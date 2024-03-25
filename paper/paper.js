@@ -71,12 +71,14 @@ function paper_promote_to_dom(entity,sys) {
 
 	let content = entity.content ? entity.content.trim() : null
 
-	// hack for markdown support
+	// hack for markdown support - can't seem to import it directly @todo improve later
 	if(entity.markdown && content) {
 		if(!window.marked) {
+			window.marked = true
 			const temp = document.createElement('script')
 			temp.setAttribute('type', 'text/javascript')
-			temp.src= "/orbital/paper/marked.min.js"
+			const path = new URL(import.meta.url).pathname + "/../marked.min.js"
+			temp.src= path
 			document.head.appendChild(temp)
 			temp.addEventListener("load", (event) => {
 				content = window.marked.parse(content)

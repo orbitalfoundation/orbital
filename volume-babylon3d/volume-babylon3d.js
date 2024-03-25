@@ -446,6 +446,7 @@ const volume_observer = {
 	about: 'volume observer using babylon3d',
 	query: { volume: true }, // @todo i need better smarter matching on queries to reduce the labor the observer below
 	observer: (args) => {
+		if(args.blob.name=='tick') return
 		if(!args || !args.entity || !args.entity.volume) return
 		volume_react(args.entity,null)
 	}

@@ -43,67 +43,90 @@ const mimeTypes = {
 	'xml': 'text/xml',
 }
 
+let root = process.cwd()
 
-const http_traffic = async (req, res) => {
+const rewrite_routes_from_url = (req) => {
+	// deal with subdomains @todo
+	return url.parse(req.url).pathname
+}
 
-	let root = "./" //process.cwd()
-	let pathname = url.parse(req.url).pathname
-	let resource = null
+const find_local_file = async(req) => {
 
-	const helper = async() => {
+	let pathname = rewrite_routes_from_url(req)
+	let resource
+
+	try {
+
+		// find exact file?
+		resource = path.join(root,pathname)
+		console.log("server::http: looking for ",resource,pathname)
+		let stats = fs.statSync(resource)
+		stats.resource = resource
+		if(!stats.isDirectory()) return stats
+
+		// a request for a directory without a trailing "/" will cause terrible grief to clients later - force promote to be a real directory request
+		if(!pathname.endsWith('/')) {
+			return { redirect: pathname+"/" }
+		}
+
+		// a request for a directory is legal if there is an index.html below it (for spa apps this is legal)
 		try {
-			// return file if found
-			resource = path.join(root,pathname)
-			let stats = fs.statSync(resource)
-			if(!stats.isDirectory()) return stats
-			// promote directory requests? (client needs to be moved to resource/ for it to find subsequent child resources correctly)
-			if(!pathname.endsWith('/')) {
-				console.log("server::http rewrote url",pathname)
-				res.writeHead(302, { 'Location': `${pathname}/` })
-				res.end()
-				return { redirect: true }
-			}
-			// found pathname/index.html? (for spa apps this is legal)
-			try {
-				resource = path.join(root,pathname,'index.html')
-				let stats = fs.statSync(resource)
-				if(!stats.isDirectory()) return stats
-			} catch(err) {
-			}
-		} catch(err) {
-		}
-		const parts = pathname.match(/[^\/]+/g)
-		// if no path fragments then try just return the root index if any
-		if(!parts || parts.length <= 1) {
-			try {
-				resource = path.join(root,"index.html")
-				let stats = fs.statSync(resource)
-				if(!stats.isDirectory()) return stats
-			} catch(err) {
-			}
-		}
-		// support users sharing urls to spa apps that are not anchored in real index.htmls ... so go up one notch and find it
-		else {
-			parts.pop()
-			pathname = parts.join('/')
 			resource = path.join(root,pathname,'index.html')
-			try {
-				let stats = fs.statSync(resource)
-				if(!stats.isDirectory()) return stats
-			} catch(err) {
-			}
+			let stats = fs.statSync(resource)
+			stats.resource = resource
+			if(!stats.isDirectory()) return stats
+		} catch(err) {
+			console.error("server::http",err)
 		}
-		return null
+
+	} catch(err) {
+		console.error("server::http",err)
 	}
 
-	let stats = await helper()
+	// if there are no parts to the path then try return the absolute root index.html as a spa app
+	const parts = pathname.match(/[^\/]+/g)
+	if(!parts || parts.length <= 1) {
+		try {
+			resource = path.join(root,"index.html")
+			let stats = fs.statSync(resource)
+			stats.resource = resource
+			if(!stats.isDirectory()) return stats
+		} catch(err) {
+			console.error("server::http",err)
+		}
+	}
+
+	// otherwise if there are parts to the url path then try return the parent index.html - basically we are on some spa app route
+	else {
+		parts.pop()
+		pathname = parts.join('/')
+		resource = path.join(root,pathname,'index.html')
+		try {
+			let stats = fs.statSync(resource)
+			stats.resource = resource
+			if(!stats.isDirectory()) return stats
+		} catch(err) {
+			console.error("server::http",err)
+		}
+	}
+
+	// or just give up
+	return null
+}
+
+
+const http_handle_request = async (req, res) => {
+
+	let stats = await find_local_file(req)
 
 	if(stats && stats.redirect) {
-		console.log("server redirected")
+		console.log("server::http sending a redirect to the client",stats.redirect)
+		res.writeHead(302, { 'Location': stats.redirect })
+		res.end()
 		return
 	}
 
-	if(!resource || !stats || stats.isDirectory()) {
+	if(!stats) {
 		console.error("server::http cannot find resource",req.url)
 		res.writeHead(404, { 'Content-Type': 'text/plain' })
 		res.write('404 Not Found')
@@ -111,15 +134,14 @@ const http_traffic = async (req, res) => {
 		return
 	}
 
-	fs.readFile(resource,'binary',(err, data) => {
-		console.log("server::http returned resource",resource)
+	fs.readFile(stats.resource,'binary',(err, data) => {
 		if(err) {
 			res.writeHead(500, {'Content-Type': 'text/plain'})
 			res.write(err)
 			res.end()
 			return
 		}
-		const mime = mimeTypes[resource.split('.').pop()] || 'text/plain'
+		const mime = mimeTypes[stats.resource.split('.').pop()] || 'text/plain'
 		res.writeHead(200, { 'Content-Type': mime, 'Content-Length': stats.size })
 		res.write(data,'binary')
 		res.end()
@@ -136,7 +158,8 @@ export class Server {
 	constructor(sys) {
 		this.sys = sys
 		if(!sys || !sys.systemid) throw "Must have sys and sys.systemid"
-		this.http = http.createServer(http_traffic).listen(sys.port || DEFAULT_PORT)
+		const port = sys && sys.config && sys.config.network_port ? sys.config.network_port : DEFAULT_PORT
+		this.http = http.createServer(http_handle_request).listen(port)
 		this.io = new Socket.Server(this.http)
 		this.io.on('connection', this.fresh_connection.bind(this) )
 		this.io.on('disconnect', this.disconnect.bind(this) )
@@ -234,10 +257,10 @@ export class Server {
 		// mark as not ours - this idea may go away
 		data.network_remote = true
 
-		// the server can intercept and react to some events - preventing them from going further
+		// the server can react to some events - preventing them from going further
 		console.log(data)
 		if(data.server_query) {
-			console.log("server: intercepted a query request - just send everything for now")
+			console.log("server: websocket got a query request - sending all db items for now - @todo refine")
 			await this.send_fresh_data(socket)
 			return
 		}

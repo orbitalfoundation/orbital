@@ -21,62 +21,58 @@ import { log,warn,error } from '../utils/log.js'
 ///			- there is therefore a risk of a loop that never ends
 ///			- @todo write some loop detection logic such as writing a loop counter into traffic
 ///
-/// @todo - reactionless writes -> could be convenient?
+/// @todo - reactionless writes -> could be convenient? right now listeners listen to all writes - could be nice to have bypass that
 /// @todo - register sys query interceptors so that i can have a separate db?
-/// @todo - handling children of an object here would be very convenient - can grant uuids in that case
+/// @todo - handling children of an object here would be very convenient - can grant uuids in that case (right now .children are ignored here)
 /// @todo - on clients we should set a public id from a public key such as from metamask
-//
-
-const DEFAULT_PORT = 4000
+///
 
 export class Sys {
 
-	host = 0
-	port = DEFAULT_PORT
-	systemid = 0
-	timePrevious = 0
-	importmaps = {}
+	// config props - try not to use this too much - later i may force this down to individual modules @todo may deprecate
+	config = {}
 
-	// alls state is indexed here for now - later it will not be volatile - may also try use indexdb @todo later
+	// for now all volatile state is indexed here for now - later it will not be volatile - may also try use indexdb @todo improve later with real persistence
 	database = {}
 
-	constructor(config) {
+	systemid = 0
+	timePrevious = 0
 
-		// set host
-		this.host = config && config.host ? config.host : 'unnamed host'
+	constructor(config={}) {
 
-		// set port
-		this.port = config && config.port ? config.port : DEFAULT_PORT
+		// detect if client or server
+		this.server = (typeof window === 'undefined') ? true : false,
 
-		// try to have some kind of durable inter-session identifier that can be used as a prefix for locally granted uuids
+		// we need a quasi-stable durable inter-session uuid that can be used as a prefix for locally created entities
 		// servers can set this in a configuration property
-		// clients may want to use a user public key possibly
+		// clients may want to use a user public key possibly?
 		// clients for now just use a random key stuffed into localstorage
 		this.systemid = config && config.systemid ? config.systemid : "you really should set this"
 
-		// is is necessary in a few cases to know if we are on a server or a client; such as networking mode or server side agents
-		this.server = config && config.server ? true : false
+		// remember the rest for other users; @todo generally i don't want a ton of config up here but it's a convenient catch all for now
+		this.config = config || {}
 
 		// bind the tick and frame update logic to allow it to be passed as a callback
 		this.run = this.run.bind(this)
 
-		// remember import maps if any
-		this.importmaps = config.importmaps || {}
-
-		// chain the kernel resolve handlers - this lets me supply a cache buffer to break apart traffic into two phases if i wish
+		//
+		// configure the initial event pipeline
+		//
 	
 		const accumulate = new OnAccumulate()
 		const uuids = new OnUUID()
-		const modules = new OnModules(this.importmaps)
+		const dependencies = new OnDependencies(config.importmaps)
 		const outsiders = new OnOutsiders()
 
 		accumulate.subsequent.push(uuids.chain.bind(uuids))
-		uuids.subsequent.push(modules.chain.bind(modules))
-		modules.subsequent.push(outsiders.chain.bind(outsiders))
+		uuids.subsequent.push(dependencies.chain.bind(dependencies))
+		dependencies.subsequent.push(outsiders.chain.bind(outsiders))
+
 		const sys = this
 		this.resolve = async (blob) => {
 			await accumulate.chain({blob,sys})
 		}
+
 	}
 
 	async resolve(blob) {
@@ -274,7 +270,7 @@ class OnUUID {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///
-/// On Modules
+/// On Modules / Dependencies
 ///
 /// There are a variety of ways we could allow dynamic import of code blobs in a declarative low-code approach.
 ///
@@ -282,8 +278,8 @@ class OnUUID {
 /// Any javascript file has its exports passed directly back into sys as if they were datagrams / events.
 /// A user can load up anything like so:
 ///
-/// const modules = {
-///		modules: [ "myfile.js", "myotherfile.js" ]
+/// const dependencies = {
+///		dependencies: [ "myfile.js", "myotherfile.js" ]
 ///	}
 ///
 /// Note:
@@ -315,9 +311,9 @@ class OnUUID {
 import { path } from './path.js'
 import { resource_mapper } from './resource_mapper.js'
 
-class OnModules {
+class OnDependencies {
 
-	content = 'load modules on demand'
+	content = 'load modules/dependencies on demand'
 	loaded_modules = []
 	subsequent = []
 

@@ -32,30 +32,34 @@ export function resource_mapper(resource,add_importmaps) {
 		return null
 	}
 
-	// server side?
-	if(resource.startsWith("/") && typeof process !== 'undefined') {
-		resource = process.cwd() + resource
-		console.log("resource loader: tacking on root of file system",resource);
+	// leave these alone
+	if(resource.startsWith("./")) {
+		return resource
+	}
+	
+	// absolute path?
+	if(resource.startsWith("/")) {
+		if(typeof process !== 'undefined') {
+			resource = process.cwd() + resource
+			console.log("resource loader: tacking on root of file system",resource)
+		} else {
+			return resource
+		}
 	}
 
-	// try find in import map
-
-	if(!resource.startsWith("/") && !resource.startsWith("./")) {
-		const tokens = resource.split("/")
-		if(tokens.length) {
-			const base = importmaps[tokens.shift()]
-			if(base) {
-				tokens.unshift(base)
-				const results = tokens.join("/")
-				log("sys: resource loader: found mapping ",resource,results)
-				return results
-			}
+	// try find in import map?
+	const tokens = resource.split("/")
+	if(tokens.length) {
+		const base = importmaps[tokens.shift()]
+		if(base) {
+			tokens.unshift(base)
+			const results = tokens.join("/")
+			log("sys: resource loader: found mapping ",resource,results)
+			return results
 		}
 	}
 
 	// not found ... try use as is?
-
 	log("sys: resource loader: using resource as is ",resource)
 	return resource
-
 }
