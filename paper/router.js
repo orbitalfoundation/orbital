@@ -4,12 +4,14 @@
 /// Caller should provide handlers to handle events
 ///
 
+const isServer = typeof window === 'undefined'
+
 export class Router {
 
 	handlers = []
 
 	async refresh(props) {
-		if(window === undefined) return
+		if(isServer) return
 		for(let handle of this.handlers) {
 			handle(window.location.href,props)
 		}
@@ -18,7 +20,7 @@ export class Router {
 	constructor(handler,props) {
 
 		// only runs on clients
-		if(window === undefined) return
+		if(isServer) return this
 
 		// a caller registers custom event handler
 		if(handler) this.handlers.push(handler)

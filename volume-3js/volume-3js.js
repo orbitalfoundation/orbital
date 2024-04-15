@@ -1,4 +1,7 @@
 /*
+
+// I cannot seem to stuff an import map in - kind of annoying @todo
+
 const importMap = {
 	"imports": {
 		"three": "./libs/three/three.module.js",
@@ -11,14 +14,33 @@ im.textContent = JSON.stringify(importMap)
 document.head.append(im)
 */
 
+
+//<script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.20.0/meshopt_decoder.js"></script>
+const im = document.createElement('script')
+//im.type = 'importmap'
+//im.textContent = JSON.stringify(importMap)
+im.src = "@orbital/volume-3js/meshopt_decoder.js"
+document.head.append(im)
+
 import * as THREE from './libs/three/three.module.js'
 import { GLTFLoader } from './libs/three/jsm/loaders/GLTFLoader.js'
+import { KTX2Loader } from './libs/three/jsm/loaders/KTX2Loader.js'
+import { DRACOLoader } from './libs/three/jsm/loaders/DRACOLoader.js'
+
+
+//import { MeshOptDecoder } from '@meshoptdecoder' // three/addons/loaders/DRACOLoader.js'
+import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
+
+
 import { OrbitControls } from './libs/three/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from './libs/three/jsm/environments/RoomEnvironment.js'
 
 class Volume {
 
 	constructor (parentDiv,opt = {}) {
+
+		//////////////////////////////////////////////////////////////////////////////////
+		// opts
 
 		this.opt = {
 			cameraView: 'full',
@@ -34,6 +56,9 @@ class Volume {
 		Object.assign( this.opt, opt || {} )
 
 		this.parentDiv = parentDiv
+
+		//////////////////////////////////////////////////////////////////////////////////
+		// renderer
 
 		const renderer = this.renderer = new THREE.WebGLRenderer({
 			antialias: true,
@@ -53,6 +78,11 @@ class Volume {
 		}
 		parentDiv.append(renderer.domElement)
 		new ResizeObserver(this.onResize.bind(this)).observe(this.parentDiv)
+
+		this.clock = new THREE.Clock();
+
+		//////////////////////////////////////////////////////////////////////////////////
+		// build a default scene with a default camera and controls
 
 		const scene = this.scene = new THREE.Scene();
 		scene.background = new THREE.Color(0x3355aa);
@@ -75,7 +105,7 @@ class Volume {
 			this.controls.enableRotate = this.opt.cameraRotateEnable
 			this.controls.enablePan = this.opt.cameraPanEnable
 			this.controls.minDistance = 0.1
-			this.controls.maxDistance = 200
+			this.controls.maxDistance = far
 			this.controls.autoRotateSpeed = 0
 			this.controls.autoRotate = false
 			this.controls.update()
@@ -84,7 +114,55 @@ class Volume {
 		camera.position.set(0, 1, 5)
 		if(this.controls) this.controls.target.set(0,1,0); else camera.lookAt.set(0,1,0)
 
-		if(true) {
+		// helpers
+		const gridHelper = new THREE.GridHelper( 10, 10 );
+		scene.add( gridHelper );
+
+		const axesHelper = new THREE.AxesHelper( 5 );
+		scene.add( axesHelper );
+
+
+		///////////////////////////////////////////////////////////////////////
+		// a default light - remove if one shows up
+
+		// light
+		const light = this.light = new THREE.DirectionalLight( 0xffffff, Math.PI );
+		light.position.set( 1.0, 1.0, -1.0 ).normalize();
+		scene.add( light );
+
+
+		///////////////////////////////////////////////////////////////////////
+		// setup loader once
+
+		const loader = this.loader = new GLTFLoader()
+
+		loader.setCrossOrigin('anonymous')
+
+		if(typeof DRACOLoader !== 'undefined') {
+			const dracoLoader = new DRACOLoader()
+			dracoLoader.setDecoderPath("@orbital/volume-3js/dracolibs/")
+			this.loader.setDRACOLoader(dracoLoader)
+		}
+
+		if(typeof KTX2Loader !== 'undefined') {
+			const ktx2Loader = new KTX2Loader()
+			ktx2Loader.setTranscoderPath("@orbital/volume-3js/ktx2loaderlibs/")
+			ktx2Loader.detectSupport(this.renderer)
+			this.loader.setKTX2Loader(ktx2Loader)
+		}
+
+		if(typeof MeshoptDecoder !== 'undefined') {
+			this.loader.setMeshoptDecoder( MeshoptDecoder )
+		}
+
+		// Install GLTFLoader plugin for VRM support
+		loader.register((parser) => { return new VRMLoaderPlugin(parser) })
+
+
+		//////////////////////////////////////////////////////////////////////////////////
+		// a debugging cube
+
+		if(false) {
 			let s = 0.5
 			const geometry = new THREE.BoxGeometry(s,s,s)
 			const material = new THREE.MeshBasicMaterial({color: 0x00ff0000, wireframe: true })
@@ -103,9 +181,9 @@ class Volume {
 		if(this.cube) {
 			let SPEED = 0.01
 			this.cube.position.y = 1
-			this.cube.rotation.x -= SPEED * 2;
-			this.cube.rotation.y -= SPEED;
-			this.cube.rotation.z -= SPEED * 3;
+			this.cube.rotation.x -= SPEED * 2
+			this.cube.rotation.y -= SPEED
+			this.cube.rotation.z -= SPEED * 3
 		}
 
 		this.renderer.render( this.scene, this.camera )
@@ -135,7 +213,7 @@ class Volume {
 			console.warn("volume: granted uuid",entity.uuid)
 		}
 
-		// camera - could generalize to anything
+		// camera - could generalize to have any object look at any thing @todo
 		if(entity.camera) {
 			if(entity.transform && entity.transform.lookat) {
 				this.camera.lookAt(...entity.transform.lookat)
@@ -147,28 +225,65 @@ class Volume {
 		}
 
 		// assign geometry
-		// @todo detect changes later; delete previous; this is just a quick hack to get some art assets loaded up for now
-		if(entity.geometry && entity.geometry.endsWith(".glb") && !entity._node && !this.nodes[entity.uuid]) {
-			const loader = new GLTFLoader()
+		// @todo detect dynamic changes to this string later and delete previous; this is just a quick hack to get some art assets loaded up for now
+
+		if(entity.geometry &&
+			(entity.geometry.endsWith(".glb") || entity.geometry.endsWith(".gltf") || entity.geometry.endsWith(".vrm") )
+			&& !entity._node && !this.nodes[entity.uuid]
+		)
+		{
+			let currentVrm = null;
+			const loader = this.loader
+			const scene = this.scene
+
 			let gltf = await loader.loadAsync( entity.geometry )
 			if(!gltf || !gltf.scene) {
 				console.error("volume: cannot load",entity.geometry)
 			} else {
+				console.log("volume: has loaded something",entity.geometry,gltf)
 
-				gltf.scene.traverse((child) => {
-					if ( child.type == 'SkinnedMesh' ) {
-					  child.frustumCulled = false;
-					}
-				})
+				// don't cull these ever please
+				gltf.scene.traverse((child) => { if ( child.type == 'SkinnedMesh' ) {  child.frustumCulled = false; } })
 
+				// for now stuff the gltf directly into the entity - @todo organize better
+				entity._gltf = gltf
+
+				// stuff the clock in too
+				entity._clock = this.clock
+
+				// for now stuff the 3js node direction into the entity - @todo organize better
 				this.nodes[entity.uuid] = entity._node = gltf.scene
-				this.scene.add(gltf.scene)
-				const x = entity.transform.xyz[0]
-				const y = entity.transform.xyz[1]
-				const z = entity.transform.xyz[2]
-				gltf.scene.position.set(x,y,z)
+
+
+				if(gltf.userData && gltf.userData.vrm) {
+					const vrm = gltf.userData.vrm
+					console.log("volume-3js: loaded vrm",vrm)
+					// calling these functions greatly improves the performance (but collides with optimizers)
+					//VRMUtils.removeUnnecessaryVertices( gltf.scene );
+					//VRMUtils.removeUnnecessaryJoints( gltf.scene );
+					vrm.scene.traverse( ( obj ) => { obj.frustumCulled = false })
+
+					// @todo what is the difference betweem vrm scene and gltf scene?
+					this.scene.add(vrm.scene)
+					const x = entity.transform.xyz[0]
+					const y = entity.transform.xyz[1]
+					const z = entity.transform.xyz[2]
+					vrm.scene.position.set(x,y,z)
+				} else {
+					console.log("volume-3js: loaded normal glb")
+					this.scene.add(gltf.scene)
+					const x = entity.transform.xyz[0]
+					const y = entity.transform.xyz[1]
+					const z = entity.transform.xyz[2]
+					gltf.scene.position.set(x,y,z)
+				}
+
+
 			}
+
 		}
+
+		// @todo update the rotation and scale of everything consistently; this whole module needs to get up to speed
 	}
 }
 
@@ -207,17 +322,10 @@ function volume_manager(entity) {
 
 }
 
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-function _volume_recurse(entity,parent=null) {
+function _volume_resolve_entity(entity,parent=null) {
 
-	if(!entity) {
-		console.error("volume: no entity")
-		return
-	}
-
-	// @note that if using multiple volumes one would have to specify the target volume for all interactions
 	let volume = volume_manager(entity)
 	if(!volume) {
 		console.warn("volume: no volume surface target associated with entity",entity)
@@ -233,10 +341,12 @@ function _volume_recurse(entity,parent=null) {
 
 	if(entity.children) {
 		entity.children.forEach(child=>{
-			_volume_recurse(child,entity)
+			_volume_resolve_entity(child,entity)
 		})
 	}
 }
+
+const clock = new THREE.Clock();
 
 const volume_observer = {
 	about: 'volume observer using 3js',
@@ -248,7 +358,7 @@ const volume_observer = {
 			})
 		}
 		else if(args.entity && args.entity.volume) {
-			_volume_recurse(args.entity,null)
+			_volume_resolve_entity(args.entity,null)
 		}
 	}
 }

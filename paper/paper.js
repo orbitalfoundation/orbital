@@ -5,40 +5,6 @@ import { Router} from './router.js'
 
 import { logo } from './logo.js'
 
-/*
-
-//
-// ssr support
-//
-
-function paper_promote_to_string(node=null,indentation=0) {
-	let built = ""
-	if(node == null) node = this.body
-	let indent = ""; for(let i = 0;i<indentation;i++) indent += "  "
-	const elem = node.elem || "div"
-	const css = node.css ? ` css='${node.css}'` : ""
-	const style = node.style ? ` style='${node.style}'` : ""
-	const props = node.props ? ` ${node.props}` : ""
-	const id = node.uuid ? ` id=${node.uuid}` : ""
-	built += `${indent}<${elem}${css}${style}${props}${id}>`
-	if(node.content) {
-		built += `${node.content}`
-	}
-	if(node.children) {
-		let counter = 0
-		node.children.forEach(child=> {
-			built += "\n"
-			built += this.dump(child,indentation+1)
-		})
-		built += "\n"
-		built += `${indent}</${elem}>`
-	} else {
-		built += `</${elem}>`			
-	}
-	return built
-}
-*/
-
 //
 // create html representation of entity
 //
@@ -73,11 +39,13 @@ function paper_promote_to_dom(entity,sys) {
 
 	// hack for markdown support - can't seem to import it directly @todo improve later
 	if(entity.markdown && content) {
+/*
 		if(!window.marked) {
 			window.marked = true
 			const temp = document.createElement('script')
 			temp.setAttribute('type', 'text/javascript')
-			const path = new URL(import.meta.url).pathname + "/../marked.min.js"
+			//const path = new URL(import.meta.url).pathname + "/../marked.min.js"
+			const path = "/@orbital/paper/marked.min.js"
 			temp.src= path
 			document.head.appendChild(temp)
 			temp.addEventListener("load", (event) => {
@@ -87,7 +55,9 @@ function paper_promote_to_dom(entity,sys) {
 			temp.addEventListener("error",(error)=>{
 				console.error(error)
 			})
-		} else {
+		} else
+*/
+		{
 			content = window.marked.parse(content)
 			node.innerHTML = content
 		}
