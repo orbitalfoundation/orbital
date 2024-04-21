@@ -49,7 +49,8 @@ export class Sys {
 		// clients for now just use a random key stuffed into localstorage
 		this.systemid = config && config.systemid ? config.systemid : "you really should set this"
 
-		// remember the rest for other users; @todo generally i don't want a ton of config up here but it's a convenient catch all for now
+		// remember the config for other users
+		// @todo generally i don't want a ton of global config if possible but it's a convenient catch all for now
 		this.config = config || {}
 
 		// bind the tick and frame update logic to allow it to be passed as a callback
@@ -85,7 +86,7 @@ export class Sys {
 		const time = performance.now()
 		const delta = this.timePrevious ? time - this.timePrevious : 0
 		this.timePrevious = time
-		const tick = {name:'tick',time,delta}
+		const tick = {name:'tick',time,delta,tick:true}
 		await this.resolve(tick)
 		if(false) {
 			// we don't use this right now - it is for a two phase action/reaction approach - right now i react immediately instead
@@ -118,15 +119,6 @@ export class Sys {
 		}
 	}
 
-	///
-	/// query
-	///
-	/// @todo decide where i want to do queries
-	/// @todo decide if i want to allow handlers to filter by queries also for performance
-	/// @todo may want to make this async or use a callback pattern because a real database won't be synchronous later
-	/// @todo need much richer query semantics
-	///
-
 	query_matches = (args,candidate) => {
 		for (const [key,val] of Object.entries(args)) {
 			if(!candidate.hasOwnProperty(key)) return false
@@ -136,7 +128,17 @@ export class Sys {
 		return true
 	}
 
-	async query(args) {
+	///
+	/// local query - sync for now not async
+	///
+	/// @todo decide where i want to do queries
+	/// @todo decide if i want to allow handlers to filter by queries also for performance
+	/// @todo may want to make this async or use a callback pattern because a real database won't be synchronous later???
+	/// @todo need much richer query semantics
+	///
+
+
+	query(args) {
 
 		if(args.uuid) {
 			return [ this.database[args.uuid] ]
@@ -222,7 +224,8 @@ class OnUUID {
 		const time = Date.now() // args.time
 
 /*
-		// trialing a name granting capability; it feels like it makes sense to support uuid granting ... @todo revisit anselm feb 2024
+		// trialing a name granting capability
+		// i disabled this because it's too fragile - it is unclear when to use it @todo revisit anselm feb 2024
 		if(!blob.uuid && blob.name && blob.hasOwnProperty("_origin")) {
 			blob.uuid = sys.host + blob._origin + '/' + blob.name
 			blob.host = sys.host
@@ -260,11 +263,21 @@ class OnUUID {
 			args.entity = entity
 			entity._updated = time
 			for(const [key,props] of Object.entries(blob)) {
+
+				// for now be careful not to obliterate nested collections
+				// @todo will need to introduce some way to prune properties
+				const prev = entity[key]
+				if(prev != null && !Array.isArray(prev) && typeof prev === 'object') {
+					if(props != null && !Array.isArray(props) && typeof props === 'object') {
+						Object.assign(prev,props)
+						continue
+					}
+				}
+
+				// obliterate previous contents with new contents
 				entity[key]=props
 			}
-		}
-
-		
+		}		
 	}
 }
 

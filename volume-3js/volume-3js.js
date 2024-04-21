@@ -1,6 +1,6 @@
 /*
 
-// I cannot seem to stuff an import map in - kind of annoying @todo
+// it would be nice if javascript exposed importmaps programmatically; but it appears to not do so @todo
 
 const importMap = {
 	"imports": {
@@ -15,10 +15,9 @@ document.head.append(im)
 */
 
 
+//import { MeshOptDecoder } from '@meshoptdecoder' 
 //<script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.20.0/meshopt_decoder.js"></script>
 const im = document.createElement('script')
-//im.type = 'importmap'
-//im.textContent = JSON.stringify(importMap)
 im.src = "@orbital/volume-3js/meshopt_decoder.js"
 document.head.append(im)
 
@@ -26,21 +25,46 @@ import * as THREE from './libs/three/three.module.js'
 import { GLTFLoader } from './libs/three/jsm/loaders/GLTFLoader.js'
 import { KTX2Loader } from './libs/three/jsm/loaders/KTX2Loader.js'
 import { DRACOLoader } from './libs/three/jsm/loaders/DRACOLoader.js'
-
-
-//import { MeshOptDecoder } from '@meshoptdecoder' // three/addons/loaders/DRACOLoader.js'
 import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
-
-
 import { OrbitControls } from './libs/three/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from './libs/three/jsm/environments/RoomEnvironment.js'
 
-class Volume {
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+const loader = new GLTFLoader()
+
+loader.setCrossOrigin('anonymous')
+
+if(typeof DRACOLoader !== 'undefined') {
+	const dracoLoader = new DRACOLoader()
+	dracoLoader.setDecoderPath("@orbital/volume-3js/dracolibs/")
+	loader.setDRACOLoader(dracoLoader)
+}
+
+if(typeof KTX2Loader !== 'undefined') {
+	const ktx2Loader = new KTX2Loader()
+	ktx2Loader.setTranscoderPath("@orbital/volume-3js/ktx2loaderlibs/")
+	//ktx2Loader.detectSupport(this.renderer) // annoying
+	loader.setKTX2Loader(ktx2Loader)
+}
+
+if(typeof MeshoptDecoder !== 'undefined') {
+	loader.setMeshoptDecoder( MeshoptDecoder )
+}
+
+loader.register((parser) => { return new VRMLoaderPlugin(parser) })
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+class VolumeManager {
+
+	uuid = 0
+	entities = {}
 
 	constructor (parentDiv,opt = {}) {
 
 		//////////////////////////////////////////////////////////////////////////////////
-		// opts
+		// merge user options overtop defaults
 
 		this.opt = {
 			cameraView: 'full',
@@ -58,7 +82,7 @@ class Volume {
 		this.parentDiv = parentDiv
 
 		//////////////////////////////////////////////////////////////////////////////////
-		// renderer
+		// sdtart renderer
 
 		const renderer = this.renderer = new THREE.WebGLRenderer({
 			antialias: true,
@@ -77,12 +101,10 @@ class Volume {
 			this.renderer.useLegacyLights = false
 		}
 		parentDiv.append(renderer.domElement)
-		new ResizeObserver(this.onResize.bind(this)).observe(this.parentDiv)
-
-		this.clock = new THREE.Clock();
+		new ResizeObserver(this._resize.bind(this)).observe(this.parentDiv)
 
 		//////////////////////////////////////////////////////////////////////////////////
-		// build a default scene with a default camera and controls
+		// create a default scene with a default camera and controls
 
 		const scene = this.scene = new THREE.Scene();
 		scene.background = new THREE.Color(0x3355aa);
@@ -123,41 +145,12 @@ class Volume {
 
 
 		///////////////////////////////////////////////////////////////////////
-		// a default light - remove if one shows up
+		// create default light - remove if one shows up
 
 		// light
 		const light = this.light = new THREE.DirectionalLight( 0xffffff, Math.PI );
 		light.position.set( 1.0, 1.0, -1.0 ).normalize();
 		scene.add( light );
-
-
-		///////////////////////////////////////////////////////////////////////
-		// setup loader once
-
-		const loader = this.loader = new GLTFLoader()
-
-		loader.setCrossOrigin('anonymous')
-
-		if(typeof DRACOLoader !== 'undefined') {
-			const dracoLoader = new DRACOLoader()
-			dracoLoader.setDecoderPath("@orbital/volume-3js/dracolibs/")
-			this.loader.setDRACOLoader(dracoLoader)
-		}
-
-		if(typeof KTX2Loader !== 'undefined') {
-			const ktx2Loader = new KTX2Loader()
-			ktx2Loader.setTranscoderPath("@orbital/volume-3js/ktx2loaderlibs/")
-			ktx2Loader.detectSupport(this.renderer)
-			this.loader.setKTX2Loader(ktx2Loader)
-		}
-
-		if(typeof MeshoptDecoder !== 'undefined') {
-			this.loader.setMeshoptDecoder( MeshoptDecoder )
-		}
-
-		// Install GLTFLoader plugin for VRM support
-		loader.register((parser) => { return new VRMLoaderPlugin(parser) })
-
 
 		//////////////////////////////////////////////////////////////////////////////////
 		// a debugging cube
@@ -174,6 +167,10 @@ class Volume {
 
 	update(time=0,delta=0) {
 
+		Object.values(this.entities).forEach(entity=> {
+			this._update_animation(entity.volume,time,delta)
+		})
+
 		if ( this.controls && this.controls.autoRotate ) {
 			this.controls.update()
 		}
@@ -189,7 +186,7 @@ class Volume {
 		this.renderer.render( this.scene, this.camera )
 	}
 
-	onResize() {
+	_resize() {
 		this.camera.aspect = this.parentDiv.clientWidth / this.parentDiv.clientHeight
 		this.camera.updateProjectionMatrix()
 		this.renderer.setSize( this.parentDiv.clientWidth, this.parentDiv.clientHeight )
@@ -197,170 +194,315 @@ class Volume {
 		this.renderer.render( this.scene, this.camera )
 	}
 
-	/////////////////////////////////////////////////////////////////
+	_update_animation(volume,time,delta) {
 
-	uuid = 0
-	nodes = {}
+		// sanity check
+		if(!volume.animations || !volume._node || !volume._clips || !volume._mixer) return
 
-	async sdl(entity,parent) {
+		// change animation?
+		if(volume.animation && volume.animation != volume._animation_previous) {
+			volume._animation_previous = volume.animation
 
-		// @todo revisit this concept later; i don't know that i really want to always have uuids here - sys should own it
-		// for now i am remembering each of the nodes that i make by having a unique uuid per node ... i need some identifier
-		// i could alternatively just stuff the _node into the real entity ... but then i need to mask out network traffic
-		if(!entity.uuid) {
-			this.uuid++
-			entity.uuid = parent ? `${parent.uuid}/${this.uuid}` : `${uuid}`
-			console.warn("volume: granted uuid",entity.uuid)
+			if(volume._animation_clip) {
+				volume._mixer.clipAction(this._animation_clip).fadeOut(0.5)
+			}
+
+			volume._animation_clip = null
+
+			if(volume.animation) {
+				Object.entries(volume._clips).forEach( ([k,v])=>{
+					if(k.includes(volume.animation)) {
+						volume._animation_clip = v
+						//console.log("volume - found animation to play now",v)
+					}
+				})
+			}
+
+			if(volume._animation_clip) {
+				volume._mixer.clipAction(volume._animation_clip).reset().fadeIn(0.5).setLoop(THREE.LoopPingPong,20).play()
+		    }
 		}
 
-		// camera - could generalize to have any object look at any thing @todo
-		if(entity.camera) {
-			if(entity.transform && entity.transform.lookat) {
-				this.camera.lookAt(...entity.transform.lookat)
-				if(this.controls) this.controls.target.set(...entity.transform.lookat)
-			}
-			if(entity.transform && entity.transform.xyz) {
-				this.camera.position.set(...entity.transform.xyz)
-			}
-		}
+		// animate the animations
+		volume._mixer.update(delta/1000)
+	}
 
-		// assign geometry
+	async _update_miscellaneous(volume) {
+
+		//////////////////////////////////////////////////////////////////////////////////////
+
+		// assign geometry and load art
+		// @todo this runs once only for now improve later
 		// @todo detect dynamic changes to this string later and delete previous; this is just a quick hack to get some art assets loaded up for now
 
-		if(entity.geometry &&
-			(entity.geometry.endsWith(".glb") || entity.geometry.endsWith(".gltf") || entity.geometry.endsWith(".vrm") )
-			&& !entity._node && !this.nodes[entity.uuid]
+		if(volume.geometry &&
+			(volume.geometry.endsWith(".glb") || volume.geometry.endsWith(".gltf") || volume.geometry.endsWith(".vrm") )
+			&& !volume._node
 		)
 		{
 			let currentVrm = null;
-			const loader = this.loader
-			const scene = this.scene
 
-			let gltf = await loader.loadAsync( entity.geometry )
+			let gltf = await loader.loadAsync( "/" + volume.geometry )
 			if(!gltf || !gltf.scene) {
-				console.error("volume: cannot load",entity.geometry)
+				console.error("volume: cannot load",volume.geometry)
 			} else {
-				console.log("volume: has loaded something",entity.geometry,gltf)
+				//console.log("volume: has loaded something",volume.geometry,gltf)
 
-				// don't cull these ever please
+				// don't cull these
 				gltf.scene.traverse((child) => { if ( child.type == 'SkinnedMesh' ) {  child.frustumCulled = false; } })
 
-				// for now stuff the gltf directly into the entity - @todo organize better
-				entity._gltf = gltf
+				// for now stuff the gltf directly into the volume
+				volume._gltf = gltf
 
-				// stuff the clock in too
-				entity._clock = this.clock
+				// stuff the node into the volume and track it
+				volume._node = gltf.scene
 
-				// for now stuff the 3js node direction into the entity - @todo organize better
-				this.nodes[entity.uuid] = entity._node = gltf.scene
+console.log("xxx1 update misc",volume)
 
-
+				// deal with vrm or normal
 				if(gltf.userData && gltf.userData.vrm) {
-					const vrm = gltf.userData.vrm
+					const vrm = volume._vrm = gltf.userData.vrm
 					console.log("volume-3js: loaded vrm",vrm)
 					// calling these functions greatly improves the performance (but collides with optimizers)
 					//VRMUtils.removeUnnecessaryVertices( gltf.scene );
 					//VRMUtils.removeUnnecessaryJoints( gltf.scene );
 					vrm.scene.traverse( ( obj ) => { obj.frustumCulled = false })
-
-					// @todo what is the difference betweem vrm scene and gltf scene?
 					this.scene.add(vrm.scene)
-					const x = entity.transform.xyz[0]
-					const y = entity.transform.xyz[1]
-					const z = entity.transform.xyz[2]
-					vrm.scene.position.set(x,y,z)
 				} else {
 					console.log("volume-3js: loaded normal glb")
 					this.scene.add(gltf.scene)
-					const x = entity.transform.xyz[0]
-					const y = entity.transform.xyz[1]
-					const z = entity.transform.xyz[2]
-					gltf.scene.position.set(x,y,z)
 				}
-
-
 			}
-
 		}
 
-		// @todo update the rotation and scale of everything consistently; this whole module needs to get up to speed
+		//////////////////////////////////////////////////////////////////////////////////////
+
+		// load animations - once only for now
+		// @todo allow invocation more than once if animation sets change
+		// @todo for now take just the first clip from each anim improve later
+		// @todo right now we are tied to the ready player me avatars
+
+		if(volume.animations && !volume._clips && volume._node) {
+			volume._clips = {}
+			for(let filename of volume.animations) {
+				const response = await fetch(filename)
+				const json = await response.json()
+				let clip = null
+				json.forEach((animation) => {
+					if (animation.tracks.length <= 0) return
+					clip = THREE.AnimationClip.parse(animation)
+				})
+				if(clip) volume._clips[filename] = clip
+			}
+
+			let part = volume._node.getObjectByName('Wolf3D_Body') || volume._node.getObjectByName('Wolf3D_Avatar') || volume._node.getObjectByName('CC_Game_Body')
+			if(!part) {
+				console.error("volume-3js: missing body parts for animations",volume)
+			} else {
+				volume._mixer = new THREE.AnimationMixer(part)
+			}
+		}
+
+		//////////////////////////////////////////////////////////////////////////////////////
+
+		this._update_pose(volume)
+
 	}
+
+	_update_pose(volume) {
+
+		if(!volume.transform || !volume._node) return
+
+		const transform = volume.transform
+		const node = volume._node
+
+		// for now set the xyz and ypr to target - to avoid tweening for now
+		if(transform.target_xyz) transform.xyz = transform.target_xyz
+		if(transform.target_ypr) transform.ypr = transform.target_ypr
+
+		// if ypr has changed then set it
+		// yaw pitch and roll are not mapped correctly to xyz @todo
+		if(transform.ypr && node.rotation && !(node.rotation.x == transform.ypr[0] && node.rotation.y == transform.ypr[1] && node.rotation.z==transform.ypr[2])) {
+			node.rotation.x = transform.ypr[0]
+			node.rotation.y = transform.ypr[1]
+			node.rotation.z = transform.ypr[2]
+		}
+
+		// if position has changed then set it
+		if(transform.xyz && node.position && !(node.position.x == transform.xyz[0] && node.position.y == transform.xyz[1] && node.position.z==transform.xyz[2])) {
+			node.position.x = transform.xyz[0]
+			node.position.y = transform.xyz[1]
+			node.position.z = transform.xyz[2]
+		}
+
+		// update scale?
+		if(transform.whd && node.scale && !(node.scale.x == transform.whd[0] && node.scale.y == transform.whd[1] && node.scale.z==transform.whd[2])) {
+			node.scale.x = transform.whd[0]
+			node.scale.y = transform.whd[1]
+			node.scale.z = transform.whd[2]
+		}
+
+		// 
+
+		// revise lookat? have this last since it depends on camera state
+		// todo - this is a bit of a hack to operate directly on the camera - it should ideally be node set target
+		if(transform.lookat && !(node.lookat && node.lookat.x == transform.lookat[0] && node.lookat.y == transform.lookat[1] && node.lookat.z==transform.lookat[2])) {
+			//if(node.setTarget) node.setTarget(new BABYLON.Vector3(...volume.transform.lookat))
+			node.lookat = transform.lookat
+		}
+
+		// set position
+		// @todo only if changed
+		// @todo consolidate handes on _vrm and _gltf - test if i can use node for vrm? 
+		// @todo allow multiple cameras
+		// @todo consolidate the concepts here - rather than special treatment
+		// @todo allow anything to lookat anything
+
+		if(volume.camera) {
+			if(transform.lookat) {
+				this.camera.lookAt(...transform.lookat)
+				if(this.controls) this.controls.target.set(...transform.lookat)
+			}
+			if(transform.xyz) {
+				this.camera.position.set(...transform.xyz)
+			}
+		}
+		else if(transform.xyz) {
+			if(volume._vrm) {
+				const x = volume.transform.xyz[0]
+				const y = volume.transform.xyz[1]
+				const z = volume.transform.xyz[2]
+				volume._vrm.scene.position.set(x,y,z)
+			}
+			else if(volume._node) {
+				const x = volume.transform.xyz[0]
+				const y = volume.transform.xyz[1]
+				const z = volume.transform.xyz[2]
+				volume._node.position.set(x,y,z)
+			}
+		}		
+
+/*
+
+	// force local default camera behind 
+	// @todo we have to figure out how to get at the current volume only!
+	if(window.volume && window.volume) {
+		const vec = new BABYLON.Vector3(0,2,-5).rotateByQuaternionToRef(rot,BABYLON.Vector3.Zero())
+		vec.x += xyz[0]
+		vec.y += xyz[1]
+		vec.z += xyz[2]
+		let lookat = [ xyz[0], xyz[1], xyz[2] ]
+		window.volume.update_camera(vec,new BABYLON.Vector3(...lookat))
+	}
+
+*/
+
+	}
+
+	//
+	// deal with changes to entities that have volumes
+	//
+
+	async resolve(entity,parent=null) {
+
+		// @todo for now force grant a uuid to each entity
+		// I am actually unsure about this concept... sys should own it?
+		// i do need some kind of uuid per node but children nodes are not visible to sys
+		// another idea is that 3js grants locally good enough uuids i believe?
+		if(!entity.uuid) {
+			this.uuid++
+			entity.uuid = parent ? `${parent.uuid}/${this.uuid}` : `${uuid}`
+			console.warn("volume-3js: force granted uuid",entity.uuid)
+		}
+
+		// store the entity
+		this.entities[entity.uuid] = entity
+
+		// for now update these right away - this could be done in the update loop instead @todo
+		await this._update_miscellaneous(entity.volume)
+
+		// recursively update children (assumption is they are also volume nodes)
+		// @todo if just a parent is being modified we shouldn't bother revisiting all the children?
+		// @todo must actually attach to parent
+		if(entity.children) {
+			for(const child in entity.children) {
+				if(!child.volume) {
+					console.error("volume-3jw: child has no volume",child,entity)
+				} else {
+					await this.resolve(child,entity)
+				}
+			}
+		}
+
+	}
+
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////
 
-const volumes = {}
+const volume_managers = {}
 
-function volume_manager(entity) {
+function _volume_manager_bind(entity) {
 
-	if(!entity) return null
+	let key = entity.volume.dom
 
-	// use existing target?
-	let id = entity.volume
-	let volume = volumes[id]
-	if(volume) return volume
+	// use first volume if none specified
+	if(!key) {
+		//console.log("volume - key not found so binding to default",entity)
+		const values = Object.values(volume_managers)
+		return values.length ? values[0] : null
+	}
 
-	// only create a volume if a surface is specified
-	if(!entity.surface) return null
+	// use specified if found
+	let manager = volume_managers[key]
+	if(manager) {
+		return manager
+	}
 
-	// find dom node to attach to?
-	let parent = document.getElementById(id)
+	// create new - the key is overloaded to refer to an existing DOM node in the html scenegraph
+	let elem = document.getElementById(key)
 
-	// if no target is found then take over the whole screen
-	if(!parent) {
-		parent = document.createElement("div")
-		parent.style = "width:100%;height:100%;padding:0px;margin:0px;position:absolute;top:0;left:0"
-		parent.id = id
-		document.body.appendChild(parent)
+	// if there is no dom node for a volume then just take over the whole screen for now
+	if(!elem) {
+		console.log("volume: taking over entire display because no parent html element was provided/found",key)
+		elem = document.createElement("div")
+		elem.style = "width:100%;height:100%;padding:0px;margin:0px;position:absolute;top:0;left:0"
+		elem.id = key
+		document.body.appendChild(elem)
 	} else {
-		console.log("volume found parent")
+		console.log("volume: attaching to a provided html node for rendering",key)
 	}
 
 	// attach
-	parent.volume = volume = volumes[id] = new Volume(parent)
-	return volume
-
+	manager = volume_managers[key] = elem._volume_manager = new VolumeManager(elem)
+	return manager
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
+///
+/// Observe traffic and do work
+/// @todo there's some argument that we should bind javascript signals or dynamic listeners?
+///
 
-function _volume_resolve_entity(entity,parent=null) {
-
-	let volume = volume_manager(entity)
-	if(!volume) {
-		console.warn("volume: no volume surface target associated with entity",entity)
-		return
-	}
-
-	try {
-		volume.sdl(entity,parent)
-	} catch(err) {
-		console.log(err)
-		return
-	}
-
-	if(entity.children) {
-		entity.children.forEach(child=>{
-			_volume_resolve_entity(child,entity)
-		})
-	}
-}
-
-const clock = new THREE.Clock();
-
-const volume_observer = {
+export const volume_observer = {
 	about: 'volume observer using 3js',
-	observer: (args) => {
+	observer: async (args) => {
 		if(!args) return
 		if(args.blob && args.blob.name == 'tick') {
-			Object.values(volumes).forEach(volume=>{
-				volume.update(args.blob.time,args.blob.delta)
+			Object.values(volume_managers).forEach(manager=>{
+				manager.update(args.blob.time,args.blob.delta)
 			})
 		}
 		else if(args.entity && args.entity.volume) {
-			_volume_resolve_entity(args.entity,null)
+
+			// before doing any work we must define which volume the entity is associated with
+			let manager = _volume_manager_bind(args.entity)
+			if(!manager) {
+				console.warn("volume: no volume surface target associated with entity",args.entity)
+				return
+			}
+
+			// just have the volume manager store the entity - it is reactive because it is real time
+			await manager.resolve(args.entity,null)
 		}
 	}
 }
-
-export const manifest = [ volume_observer ]

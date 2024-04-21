@@ -24,7 +24,7 @@ function uuidv4() { // Public Domain/MIT
 	});
 }
 
-export const client_create_uuid = async () => {
+export const client_create_uuid = () => {
 	const storage = window.localStorage
 	if(!storage) {
 		return "client-"+uuidv4()
@@ -42,5 +42,6 @@ export const server_create_uuid = () => {
 			let systemid = modules.default.machineIdSync({original:true})
 			resolve(systemid)
 		})
+		reject()
 	})
 }

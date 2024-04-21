@@ -2,7 +2,9 @@
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 ///
-/// a chat box
+/// conversation support; text and voice, pushes events to sys
+///
+/// @todo should network
 ///
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -47,15 +49,22 @@ function onchange(event,parent,sys) {
 	event.target.value = ''
 
 	// network the event
-	sys.resolve({chatter:value})
+	sys.resolve({
+		// @todo supply a uuid of whom this is refering to - the sponsor basically
+		conversation:{
+			sponsor:null,
+			text:value
+		}
+	})
 
-	// @todo paint this below as a result of observing traffic rather than doing it now - so it networks
+	// @todo paint this below as a result of observing traffic rather than doing it now - so it networks...
 
-	// @todo paper should be reactive
+	// @todo 'paper' should be reactive ideally
 	// const elem = { kind:'div', css:'font-size:2em', content:value }
 	//if(chatbox.children.length>5) chatbox.children.shift()
 	//chatbox.children.splice(chatbox.children.length-1,0,elem)
 
+	// hack around the lack of reactivity of 'paper'
 	const node = document.createElement('div')
 	node.innerHTML=value
 	const chat1 = document.getElementById("chat1")
@@ -88,7 +97,7 @@ export const controls = {
 							document.getElementById("chat1").style.display = "none"
 							document.getElementById("chat2").style.display = "none"
 						} else {
-							start_continuous_audio_recognizer()
+							restart_continuous_audio_recognizer()
 							document.getElementById("chat1").style.display = "block"
 							document.getElementById("chat2").style.display = "block"
 						}
@@ -99,29 +108,39 @@ export const controls = {
 	]
 }
 
-// start or restart audio recognizer
-function start_continuous_audio_recognizer() {
+///
+/// start or restart audio recognizer (invoked from controls above)
+/// mount this globally because it needs to be able to be start/stopped
+///
+
+function restart_continuous_audio_recognizer() {
 	try {
 		var recognition = window.recognition = new webkitSpeechRecognition()
 		recognition.continuous = true
 		recognition.interimResults = true
 		recognition.start();
-		console.log("speech to text is running")
+		console.log("chat widget: speech to text is running")
 		recognition.onresult = function(event) {
 			console.log(event)
 			for (var i = event.resultIndex; i < event.results.length; ++i) {
 				const transcript = event.results[i][0].transcript
 				if (event.results[i].isFinal) {
 					console.log('speech to text final: ' + transcript);
-					window.sys.resolve({chatter:transcript})
+					window.sys.resolve({
+						// @todo supply a uuid of whom this is refering to - the sponsor basically
+						conversation:{
+							sponsor:null,
+							text:transcript
+						}
+					})
 					// @todo write to the local chat also
 				} else {
-					console.log('speech to text interim: ' + transcript);
+					console.log('chat widget: speech to text interim: ' + transcript);
 				}
 			}
 		}
 	} catch(err) {
-		console.log('speech to text error: ' + err)
+		console.log('chat widget: speech to text error: ' + err)
 	}
 }
 
