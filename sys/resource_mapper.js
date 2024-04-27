@@ -41,7 +41,7 @@ export function resource_mapper(resource,add_importmaps) {
 	if(resource.startsWith("/")) {
 		if(typeof process !== 'undefined') {
 			resource = process.cwd() + resource
-			console.log("resource loader: tacking on root of file system",resource)
+			//console.log("resource loader: tacking on root of file system",resource)
 		} else {
 			return resource
 		}
@@ -54,12 +54,12 @@ export function resource_mapper(resource,add_importmaps) {
 		if(base) {
 			tokens.unshift(base)
 			const results = tokens.join("/")
-			log("sys: resource loader: found mapping ",resource,results)
+			//log("sys: resource loader: found mapping ",resource,results)
 			return results
 		}
 	}
 
 	// not found ... try use as is?
-	log("sys: resource loader: using resource as is ",resource)
+	//log("sys: resource loader: using resource as is ",resource)
 	return resource
 }

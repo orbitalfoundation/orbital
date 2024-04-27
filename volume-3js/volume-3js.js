@@ -235,9 +235,8 @@ class VolumeManager {
 		// @todo this runs once only for now improve later
 		// @todo detect dynamic changes to this string later and delete previous; this is just a quick hack to get some art assets loaded up for now
 
-		if(volume.geometry &&
+		if(volume.geometry && !volume._node &&
 			(volume.geometry.endsWith(".glb") || volume.geometry.endsWith(".gltf") || volume.geometry.endsWith(".vrm") )
-			&& !volume._node
 		)
 		{
 			let currentVrm = null;
@@ -257,19 +256,17 @@ class VolumeManager {
 				// stuff the node into the volume and track it
 				volume._node = gltf.scene
 
-console.log("xxx1 update misc",volume)
-
 				// deal with vrm or normal
 				if(gltf.userData && gltf.userData.vrm) {
 					const vrm = volume._vrm = gltf.userData.vrm
-					console.log("volume-3js: loaded vrm",vrm)
+					//console.log("volume-3js: loaded vrm",vrm)
 					// calling these functions greatly improves the performance (but collides with optimizers)
 					//VRMUtils.removeUnnecessaryVertices( gltf.scene );
 					//VRMUtils.removeUnnecessaryJoints( gltf.scene );
 					vrm.scene.traverse( ( obj ) => { obj.frustumCulled = false })
 					this.scene.add(vrm.scene)
 				} else {
-					console.log("volume-3js: loaded normal glb")
+					//console.log("volume-3js: loaded normal glb")
 					this.scene.add(gltf.scene)
 				}
 			}
@@ -281,18 +278,24 @@ console.log("xxx1 update misc",volume)
 		// @todo allow invocation more than once if animation sets change
 		// @todo for now take just the first clip from each anim improve later
 		// @todo right now we are tied to the ready player me avatars
+		// @todo this avatar animation loading feature could actually move to puppet possibly
 
 		if(volume.animations && !volume._clips && volume._node) {
 			volume._clips = {}
 			for(let filename of volume.animations) {
-				const response = await fetch(filename)
-				const json = await response.json()
-				let clip = null
-				json.forEach((animation) => {
-					if (animation.tracks.length <= 0) return
-					clip = THREE.AnimationClip.parse(animation)
-				})
-				if(clip) volume._clips[filename] = clip
+				try {
+					const response = await fetch(filename)
+					const json = await response.json()
+					let clip = null
+					json.forEach((animation) => {
+						if (animation.tracks.length <= 0) return
+						clip = THREE.AnimationClip.parse(animation)
+					})
+					if(clip) volume._clips[filename] = clip
+				} catch(err) {
+					console.error("volume-3js: cannot load animation file",filename,err)
+					continue
+				}
 			}
 
 			let part = volume._node.getObjectByName('Wolf3D_Body') || volume._node.getObjectByName('Wolf3D_Avatar') || volume._node.getObjectByName('CC_Game_Body')
@@ -316,7 +319,7 @@ console.log("xxx1 update misc",volume)
 		const transform = volume.transform
 		const node = volume._node
 
-		// for now set the xyz and ypr to target - to avoid tweening for now
+		// for now set the xyz and ypr to target - @todo introduce real interframe update smoothing
 		if(transform.target_xyz) transform.xyz = transform.target_xyz
 		if(transform.target_ypr) transform.ypr = transform.target_ypr
 
@@ -346,10 +349,10 @@ console.log("xxx1 update misc",volume)
 
 		// revise lookat? have this last since it depends on camera state
 		// todo - this is a bit of a hack to operate directly on the camera - it should ideally be node set target
-		if(transform.lookat && !(node.lookat && node.lookat.x == transform.lookat[0] && node.lookat.y == transform.lookat[1] && node.lookat.z==transform.lookat[2])) {
-			//if(node.setTarget) node.setTarget(new BABYLON.Vector3(...volume.transform.lookat))
-			node.lookat = transform.lookat
-		}
+		//if(transform.lookat && !(node.lookat && node.lookat.x == transform.lookat[0] && node.lookat.y == transform.lookat[1] && node.lookat.z==transform.lookat[2])) {
+		//	//if(node.setTarget) node.setTarget(new BABYLON.Vector3(...volume.transform.lookat))
+		//	node.lookat = transform.lookat
+		//}
 
 		// set position
 		// @todo only if changed
@@ -382,20 +385,12 @@ console.log("xxx1 update misc",volume)
 			}
 		}		
 
-/*
-
-	// force local default camera behind 
-	// @todo we have to figure out how to get at the current volume only!
-	if(window.volume && window.volume) {
-		const vec = new BABYLON.Vector3(0,2,-5).rotateByQuaternionToRef(rot,BABYLON.Vector3.Zero())
-		vec.x += xyz[0]
-		vec.y += xyz[1]
-		vec.z += xyz[2]
-		let lookat = [ xyz[0], xyz[1], xyz[2] ]
-		window.volume.update_camera(vec,new BABYLON.Vector3(...lookat))
-	}
-
-*/
+		if(volume.camera_follow) {
+			const v = new THREE.Vector3(0,2,-5).applyQuaternion(node.quaternion)
+			const p = node.position.clone().add(v)
+			this.camera.position.set(p.x,p.y,p.z)
+			this.camera.lookAt(node.position.x,node.position.y+1,node.position.z)
+		}
 
 	}
 
@@ -470,7 +465,7 @@ function _volume_manager_bind(entity) {
 		elem.id = key
 		document.body.appendChild(elem)
 	} else {
-		console.log("volume: attaching to a provided html node for rendering",key)
+		//console.log("volume: attaching to a provided html node for rendering",key)
 	}
 
 	// attach

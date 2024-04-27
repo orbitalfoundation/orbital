@@ -10,19 +10,20 @@ export class Router {
 
 	handlers = []
 
-	async refresh(props) {
+	broadcast_change() {
+		console.log('router: broadcasting changed url',window.location.href)
 		if(isServer) return
 		for(let handle of this.handlers) {
-			handle(window.location.href,props)
+			handle(window.location.href)
 		}
 	}
 
-	constructor(handler,props) {
+	constructor(handler) {
 
 		// only runs on clients
 		if(isServer) return this
 
-		// a caller registers custom event handler
+		// a caller registers custom event handler @todo may want to verify uniqueness
 		if(handler) this.handlers.push(handler)
 
 		const history = window.history
@@ -33,11 +34,10 @@ export class Router {
 		// observe any browser level state push event
 		var previousPushState = history.pushState.bind(history)
 
-
 		history.pushState = (state,path,origin) => {
 			console.log("router: pushstate occured",state,path,origin)
 			previousPushState(state,path,origin)
-			this.refresh(props)
+			this.broadcast_change()
 			event.preventDefault()
 			return false
 		}
@@ -45,7 +45,7 @@ export class Router {
 		// observe user activity on the browser navigation buttons
 		window.addEventListener("popstate",(event)=>{
 			console.log("router: observed popstate",event)
-			this.refresh(props)
+			this.broadcast_change()
 			event.preventDefault()
 			return false
 		})

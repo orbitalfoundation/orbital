@@ -182,7 +182,7 @@ class OnAccumulate {
 			return
 		}
 		if(typeof blob === 'function') {
-			warn('sys::accumulate functions not supported yet')
+			//warn('sys::accumulate functions not supported yet')
 			return
 		}
 		if( typeof blob !== 'object') {
@@ -384,15 +384,15 @@ class OnDependencies {
 
 			// go ahead and pass module contents to sys
 			try {
-				log("sys::module loading",raw,resource)
+				//log("sys::module loading",raw,resource)
 				const module = await import(raw)
 				if(!module) {
 					error('sys: module not found ' + resource)
 					return
 				}
-				console.log('sys::modules now parsing')
+				//log('sys::modules now parsing')
 				for(const [k,v] of Object.entries(module)) {
-					console.log('sys::modules loaded and resolving this item',v,resource)
+					//log('sys::modules loaded and resolving this item',v,resource)
 					//recursively_set_origin(v,resource)
 					await sys.resolve(v)
 				}

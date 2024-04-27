@@ -6,39 +6,39 @@ import { Router} from './router.js'
 import { logo } from './logo.js'
 
 //
-// create html representation of entity
+// create html representation of paper component
 //
 
-function paper_promote_to_dom(entity,sys) {
+function paper_promote_to_dom(paper,sys) {
 
-	let node = entity._node
+	let node = paper._dom
 
 	if(node) {
-		// @todo add dirty or change detector
+		// @todo add dirty or change detector!
 		return node
 	}
 
-	const kind = entity.kind || 'div'
+	const kind = paper.kind || 'div'
 
 	// update dom node if changed
 	if(!node || node._flavor != kind) {
 		if(node) node.remove()
-		if(!entity.link) {
-			node = entity._node = document.createElement(entity.kind || 'div')
+		if(!paper.link) {
+			node = paper._dom = document.createElement(kind)
 		} else {
-			node = entity._node = document.createElement("a")
-			entity._node.href = entity.link
-			if(!entity.content) entity.content = entity.link
+			node = paper._dom = document.createElement("a")
+			paper._dom.href = paper.link
+			if(!paper.content) paper.content = paper.link
 		}
-		node.id = entity.id || entity.uuid
-		node._flavor = kind
+		node.id = paper.id || paper.uuid
+		paper._flavor = kind
 	}
 
 
-	let content = entity.content ? entity.content.trim() : null
+	let content = paper.content ? paper.content.trim() : null
 
 	// hack for markdown support - can't seem to import it directly @todo improve later
-	if(entity.markdown && content) {
+	if(paper.markdown && content) {
 /*
 		if(!window.marked) {
 			window.marked = true
@@ -53,7 +53,7 @@ function paper_promote_to_dom(entity,sys) {
 				node.innerHTML = content
 			})
 			temp.addEventListener("error",(error)=>{
-				console.error(error)
+				error(error)
 			})
 		} else
 */
@@ -68,24 +68,24 @@ function paper_promote_to_dom(entity,sys) {
 		node.innerHTML = content
 	}
 
-	// button support - supply the parent entity
-	if(entity.onclick) {
-		node.onclick = (event) => { entity.onclick(event,entity,sys) }
+	// button support - supply the parent paper component
+	if(paper.onclick) {
+		node.onclick = (event) => { paper.onclick(event,paper,sys) }
 	}
 
-	if(entity.onchange) {
-		node.onchange = (event) => { entity.onchange(event,entity,sys) }
+	if(paper.onchange) {
+		node.onchange = (event) => { paper.onchange(event,paper,sys) }
 	}
 
 	//////////////////////////////////////////////////////////////////////////////////////////
 	// apply properties in general
 
 	// apply css if changed; handles strings or hashes, converts to camelcase
-	if(entity.css) {
-		if (typeof entity.css === 'string' || entity.css instanceof String) {
-			node.style.cssText = entity.css
-		} else if (typeof entity.css === 'object') {
-			for(const [k,v] of Object.entries(entity.css)) {
+	if(paper.css) {
+		if (typeof paper.css === 'string' || paper.css instanceof String) {
+			node.style.cssText = paper.css
+		} else if (typeof paper.css === 'object') {
+			for(const [k,v] of Object.entries(paper.css)) {
 				var camelCased = k.replace(/-([a-z])/g,(g) => { return g[1].toUpperCase() })
 				node.style[k] = v
 			}
@@ -93,10 +93,10 @@ function paper_promote_to_dom(entity,sys) {
 	}
 
 	// apply classes to the node if changed; handles strings or arrays
-	if(entity.classes) {
-		let classes = entity.classes
-		if (typeof entity.classes === 'string' || entity.classes instanceof String) {
-			classes = entity.classes.split(' ')
+	if(paper.classes) {
+		let classes = paper.classes
+		if (typeof paper.classes === 'string' || paper.classes instanceof String) {
+			classes = paper.classes.split(' ')
 		}
 		if(Array.isArray(classes)) {
 			for(const c of classes) {
@@ -110,10 +110,10 @@ function paper_promote_to_dom(entity,sys) {
 		}
 	}
 
-	// set props - deal with deletion at some point
-	if(entity.props) {
-		//if(!node._entity_props) node._entity_props = {}
-		for(let [k,v] of Object.entries(entity.props)) {
+	// set other props - deal with deletion at some point
+	if(paper.props) {
+		//if(!node._props) node._props = {}
+		for(let [k,v] of Object.entries(paper.props)) {
 			if(this[k] != v) {
 				this[k] = v
 				//this.setAttribute(k,v)
@@ -130,8 +130,8 @@ function paper_promote_to_dom(entity,sys) {
 	// - we could have real dom custom elements - these have to then be passed to the remote end for rehydration...
 	//
 
-	if(entity.logo) {
-		logo(entity)
+	if(paper.logo) {
+		logo(paper)
 	}
 
 	//////////////////////////////////////////////////////////////////////////////////////////
@@ -165,7 +165,7 @@ function paper_promote_to_dom(entity,sys) {
 	}
 
 	// look for js
-	if(entity.content) {
+	if(paper.content) {
 		const child = node.querySelector('script')
 		if(child) {
 			log('paper: testing javascript execution')
@@ -179,116 +179,143 @@ function paper_promote_to_dom(entity,sys) {
 	return node
 }
 
+
 //
-// our entity routing scheme; catches non external http clicks and things not marked as #extern
+// update
 //
-// @todo minor: sys should produce all the nodes along the hiearchy to the current path; since children typically want parents to be present
-// @todo minor: server side -> on the server side there's no strategy for resolving /blah/apps-evolved etc ... it should hunt for parent index.html
+// hide or show a node (effectively synchronize the state)
+//
+// if a paper node is marked as a 'page' then it cannot exist with others - later introduce a bitmask
+//
+// @todo these should do an ssr friendly supporting merge not brute force replace replace
+// @todo smarter more granular updates - this node may already be visible... so by append/replacing it i am doing extra meaningless work that may cause flickers
 //
 
-async function paper_route(uri,props) {
+function update(entity,path,sys,parent=null) {
 
-	if(!props || !props.sys) return
+	const paper = entity.paper
 
-	const recurse = (path,entity,parent) => {
+	// set for convenience
 
-		// attach nodes to dom
-		// @todo richer wildcard matching
-		// @todo instead these should do an ssr supporting merge not brute force replace replace
-		// @todo also this node may already be visible... so by append/replacing it i am doing extra meaningless work that may cause flickers
+	if(entity.uuid) paper.uuid = entity.uuid
+	if(entity.id) paper.id = entity.id
 
-		if(!entity.regex || path.match(entity.regex)) {
-			entity._node = paper_promote_to_dom(entity,props.sys)
-			if(parent) {
-				parent._node.appendChild(entity._node)
-			} else {
-				document.body.replaceChildren(entity._node)
-			}
-		} else if(entity.regex && entity._node) {
-			entity._node.remove()
+	// visible?
+
+	const visible = paper.regex == null || (path && path.match(paper.regex))
+
+	// hide?
+
+	if(!visible) {
+		if(paper._dom) {
+			paper._dom.remove()
 		}
-
-		// also walk children to force sub-routes to be visible; and to mount children in general on a parent
-		// @todo for now i force a child uuid - debate the merits of this
-		// @todo children will be a rich query at some point not just a list
-
-		if(entity.children && entity.children.length) {
-			let counter = 0
-			for(const child of entity.children) {
-				counter++
-				if(!child.uuid) child.uuid = `${entity.uuid}/${counter}`
-				recurse(path,child,entity)
-			}
-		}
-	}
-
-	//
-	// query for candidates to paint and then paint them
-	//
-	// @todo improve sys.query -> for now i have to get them all since sys.query cannot return me all the nodes along a path so root nodes would not be passed
-	// @todo one note is that for now since i fetch *every* node i can manage the hide/show of root nodes... but later we will need a visible list
-	//
-
-	const candidates = await props.sys.query({paper:true})
-
-	if(!candidates.length) {
-		console.warn("paper: no candidates at all")
 		return
 	}
 
-	// recover root for now - @todo revisit
-	let root = '/'
-	candidates.forEach(entity=>{
-		if(entity.root) {
-			// if a root path is supplied then establish that as the root of the filesystem
-			const frag = decodeURI((new URL(entity.root)).pathname)
-			root = frag.substr(0, frag.lastIndexOf('/'))
+	// build or update dom node if needed (this routine should do nothing if there were no changes)
+
+	paper._dom = paper_promote_to_dom(paper,sys)
+
+	// adjust attachment point if needed
+
+	if(parent && parent._dom) {
+		parent._dom.appendChild(paper._dom)
+	} else {
+		if(paper.page) {
+			// @todo only replace other pages not everything
+			document.body.replaceChildren(paper._dom)
+		} else {
+			document.body.appendChild(paper._dom)
 		}
-	})
-
-	// get user url request (a browser event from user has occurred or system state has changed)
-
-	let path = decodeURI((new URL(uri)).pathname)
-	log("paper route: user navigation event! ",uri,path)
-
-	// some sites don't start at the '/' and this fact needs to be propagated to server during queries
-
-	if(root && root != "/") {
-		if( path.startsWith(root) ) {
-			path = path.substr(root.length)
-		}
-		if(!path.length) path="/"
 	}
 
-	if(!candidates || !candidates.length) {
-		error("paper route: hmm, no matching route... what should I do???",candidates,path)
-		const err = document.createElement("div")
-		err.innerHTML = "404 SPA app page not fully resolved"
-		document.body.replaceChildren(err)
-		return null
+	if(paper.children && paper.children.length) {
+		let counter = 0
+		for(const child of paper.children) {
+			const _scratch = { uuid:`${entity.uuid}/${counter++}`, paper:child }
+			_scratch.paper.uuid = _scratch.uuid
+			update(_scratch,null,sys,paper)
+		}
 	}
-
-	candidates.forEach(entity=>{
-		recurse(path,entity,null)
-	})
-
-	return null
 }
 
-///
-/// paper component
-///
+
+//
+// get the path the user requested - stripping an 'anchor' if any
+// never let path be null - just for my own sanity
+//
+
+function get_path(uri,anchor) {
+	let path = decodeURI((new URL(uri)).pathname)
+	if(anchor && path.startsWith(anchor) ) {
+		path = path.substr(anchor.length)
+	}
+	if(!path || !path.length) path="/"
+	return path
+}
+
+//
+// an event has occured - intercept only paper events
+//
 
 function observer(args) {
+	if(args.blob.tick) return
 	if(!args.blob.paper) return
-	console.log("paper: got some traffic",args)
+
 	const sys = args.sys
-	if(!this.router) this.router = new Router(paper_route,{sys})
-	this.router.refresh({sys})
+
+	//
+	// allow an anchor to be specified
+	// (in this way urls can be remapped from say /docs/license to /license )
+	//
+
+	let anchor = this.anchor || null
+	if(args.blob.paper.anchor) {
+		anchor = args.blob.paper.anchor
+		anchor = decodeURI((new URL(anchor)).pathname)
+		anchor = anchor.substr(0, anchor.lastIndexOf('/'))
+		if(anchor == "/") anchor = null
+		this.anchor = anchor
+		console.log("paper: will remove this anchor from subsequent url path requests:",anchor)
+	}
+
+	//
+	// update all elements on browser navigation event
+	//
+
+	if(!this.router) {
+		this.url = "/"
+		this.router = new Router((url)=>{
+			this.url = url
+			console.log("paper: router refreshing with url",url)
+			const path = get_path(this.url,anchor)
+			const candidates = sys.query({paper:true})
+			candidates.forEach(entity=>{
+				update(entity,path,sys)
+			})
+		})
+		// force the url to be updated now
+		this.router.broadcast_change()
+
+		// no need to run the below since the above will force the update
+		return
+	}
+
+	//
+	// update a single element when it changes
+	//
+
+	const path = get_path(this.url,anchor)
+	update(args.entity,path,sys)
 }
 
+///
+/// paper component observer
+///
+
 export const paper_component_observer = {
-	about:'paper: react to entities with paper property',
-	observer,
+	about:'paper component observer',
+	observer
 }
 
