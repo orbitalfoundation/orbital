@@ -169,32 +169,124 @@ class OnAccumulate {
 
 	async chain(args) {	
 
-		const {blob,sys} = args
+		let {blob,sys} = args
 
 		if(!blob) {
 			error('sys:accumulate: empty input')
 			return
 		}
+
 		if(Array.isArray(blob)) {
 			for(let i = 0; i < blob.length; i++) {
 				await this.chain({blob:blob[i],sys})
 			}
 			return
 		}
+
 		if(typeof blob === 'function') {
 			//warn('sys::accumulate functions not supported yet')
 			return
 		}
+
 		if( typeof blob !== 'object') {
 			error('sys::accumulate: subject is not an entity?',blob)
 			return
 		}
 
+		// must detach from inputs asap so that nobody ever accidentally writes to the passed pointer state
+		if(!args.blob.tick) {
+			try {
+				args.blob = deepAppend(blob)
+			} catch(err) {
+				error('sys:accumulate: deepcopy error',err)
+			}
+		}
+
+		// pass through other handlers
 		for(const handler of this.subsequent) {
 			await handler(args)
 		}
 	}
 }
+
+//
+// note this fails to deal with deletions
+// @todo maybe structuredClone to copy simple types also
+//
+
+function deepAppend(source,target={},visited=[]) {
+
+	if(!source) {
+		console.error("sys: corrupt input")
+		return source
+	}
+
+	if(Array.isArray(source)) {
+		console.error("sys: corrupt data",source)
+		return source
+	}
+
+	if( typeof source !== 'object') {
+		console.error("sys: corrupt input",source)
+		return source
+	}
+
+	Object.entries(source).forEach( ([k,v]) => {
+
+		// examine source value
+
+		if(!v) {
+			// use as is
+		}
+		else if(Array.isArray(v)) {
+			// @todo arguably could deep copy elements
+		}
+		else if(typeof v === 'function') {
+			// @todo copy function refs directly
+		}
+		else if(typeof v === 'object') {
+			// deep copy this to shake loose any pointers
+			v = deepAppend(v,{},visited)
+		}
+
+		// examine target value
+
+		const orig = target[k]
+		if(!orig) {
+			// write v as is overtop target
+		}
+		else if(Array.isArray(orig)) {
+			// write v as is overtop target
+		}
+		else if(typeof orig === 'function') {
+			// write v as is overtop target
+		}
+		else if(typeof orig === 'object' && typeof v === 'object') {
+			v = deepAppend(v,orig)
+			target[k] = v
+			visited.push(v)
+		}
+
+		target[k] = v
+
+	})
+
+	return target
+}
+
+/*
+for(let [key,props] of Object.entries(blob)) {
+	if(props && !Array.isArray(props) && typeof props === 'object') {
+		const eprops = entity[key]
+		if(eprops && !Array.isArray(eprops) && typeof eprops === 'object') {
+			Object.assign(eprops,props)
+			continue
+		}
+	}
+	// for simple types just obliterate previous contents with new contents
+	entity[key]=props
+}
+*/
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -235,6 +327,9 @@ class OnUUID {
 			console.log("sys::uuid not granting a uuid because it may have one",blob)
 		}
 */
+
+		blob._now = performance.now() * 1000
+
 		// return if no uuid; nothing to really do; set a few props
 		let uuid = blob.uuid
 		if(!uuid) {
@@ -244,39 +339,23 @@ class OnUUID {
 			return
 		}
 
-		// rewrite uuid if desired; backwrites uuid into caller scope!
-		if(uuid.includes('[UUID]')) {
-			uuid = blob.uuid = uuid.replace('[UUID]',sys.systemid)
-		}
-
-		// write new entity to database
+		// get existing entity if any
 		let entity = sys.database[uuid]
+
+		// otherwise make a new one
 		if(!entity) {
 			args.fresh = true
 			entity = args.entity = sys.database[uuid] = blob
-			entity._created = entity._updated = time
+			entity._created = entity._updated = blob._created = blob._updated = time
 		}
 		
-		// update entity insitu; backwrites changes into caller scope for convenience
+		// copy blob props to entity
 		else {
 			args.fresh = false
 			args.entity = entity
 			entity._updated = time
-			for(const [key,props] of Object.entries(blob)) {
-
-				// for now be careful not to obliterate nested collections
-				// @todo will need to introduce some way to prune properties
-				const prev = entity[key]
-				if(prev != null && !Array.isArray(prev) && typeof prev === 'object') {
-					if(props != null && !Array.isArray(props) && typeof props === 'object') {
-						Object.assign(prev,props)
-						continue
-					}
-				}
-
-				// obliterate previous contents with new contents
-				entity[key]=props
-			}
+			entity._now = performance.now() * 1000
+			deepAppend(blob,entity)
 		}		
 	}
 }

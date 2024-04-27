@@ -76,7 +76,7 @@ export async function converse(args,callback) {
 		if(mark1 && mark1 < mark2) {
 			emotion = text.substring(mark1+1,mark2)
 			text = text.slice(0,mark1)
-			log("puppet::converse emotion",emotion)
+			log("puppet::converse emotion from text",text,emotion)
 		}
 	}
 
@@ -86,19 +86,28 @@ export async function converse(args,callback) {
 	//		i'd prefer to break this into two separate routines; a sentence splitter and a viseme builder per frag
 	//
 
-	const queue = lipsyncQueue(text)
+	let queue = lipsyncQueue(text)
 
 	//
+	// tidy up the queue elements a bit
 	// rebuild all sentences because the words are buried inside of separate tokens but tts wants to say a string
-	// @todo this is a bit messy - it should be done inside the queue generation above
 	//
+
+	const conversation = conversationCounter++
 
 	for(let segment = 0;segment < queue.length;segment++) {
-		const blob = queue[segment]
-		const sentence = !blob.text ? null : blob.text.map( term => { return term.word }).join(' ')
+		let blob = queue[segment]
+		blob.segment = segment
+		blob.segmentsTotal = queue.length
+		blob.conversation = conversation
+		blob.emotion = emotion
+		blob.prompt = args.text
+		let sentence = !blob.text ? null : blob.text.map( term => { return term.word }).join(' ')
 		if(sentence && sentence.length) {
 			blob.sentence = sentence
-			console.log("puppet::converse segment",sentence)
+			//console.log("puppet::converse segment",sentence)
+		} else {
+			delete blob.sentence
 		}
 	}
 
@@ -110,21 +119,9 @@ export async function converse(args,callback) {
 	//
 
 	for(let segment = 0;segment < queue.length;segment++) {
-		const blob = queue[segment]
+		let blob = queue[segment]
 		await converse_fragment(args,blob)
-	}
-
-	//
-	// pass all fragments to callback
-	//
-
-	for(let segment = 0;segment < queue.length;segment++) {
-		const blob = queue[segment]
-		blob.conversation = conversationCounter++
-		blob.segment = segment
-		blob.emotion = emotion
-		blob.prompt = args.text
-		callback(blob)
+		callback(blob,segment)
 	}
 
 }
@@ -148,7 +145,7 @@ async function converse_fragment(args,blob) {
 			blob.audio = "data:audio/mp3;base64," + window.btoa( binary )
 			// @todo this is not matching an mp3 but it would be very very helpful to know the duration - try fix
 			//blob.duration = getmp3duration(bufferArray)
-			console.log("puppet::converse tts success fragment",sentence)
+			//console.log("puppet::converse tts success fragment",sentence)
 		}
 	}
 
@@ -168,7 +165,7 @@ async function converse_fragment(args,blob) {
 
 	if(args.whisper && bufferArray) {
 		blob.whisper = await stt_whisper(args.tts,bufferArray)
-		console.log("puppet::converse whisper success fragment",sentence)
+		//console.log("puppet::converse whisper success fragment",sentence)
 	}
 }
 

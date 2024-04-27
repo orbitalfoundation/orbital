@@ -12,28 +12,45 @@ export const observer = {
 
 	observer: async (args) => {
 
-		// sanity check
-		if(!args || !args.blob || !args.sys || args.blob.tick) return
+		// ignore tick for sanity
+		if(args.blob.tick) return
 
-		// intercept general player-to-player text conversations
+		// intercept general player-to-player text conversations only
 		if(!args.blob.conversation || !args.blob.conversation.text) return
 
-		// any reasoning puppets in range? @todo improve
+		// get puppets
 		const entities = args.sys.query({puppet:true})
-		let entity = null
-		entities.forEach(candidate=>{
-			entity = candidate.puppet.reason ? candidate : null
-		})
-		if(!entity) return
 
-		// allow an application independent module to handle the details of the conversation
-		converse({
-			text:args.blob.conversation.text,
-			reason: entity.puppet.reason,
-			tts: entity.puppet.tts,
-		},(blob)=>{
-			sys.resolve({ uuid:entity.uuid,performance:blob})			
-		})
+		// randomize them for fun
+		entities.sort(() => Math.random() - 0.5)
+
+		// find puppets to converse with
+		for(const entity of entities) {
+
+			// able to hold a conversation?
+			if(!entity.puppet.reason) continue
+
+			// not busy?
+			if(entity.puppet.busy) continue
+
+			// nearby?
+			// TBD
+
+			// handle the details of the conversation; also mark the puppet as too busy for further chatter atm
+			converse({
+				text: args.blob.conversation.text,
+				reason: entity.puppet.reason,
+				tts: entity.puppet.tts,
+			},(blob,segment)=>{
+				console.log("puppet::converse - callback",segment,entity.uuid,blob)
+				sys.resolve({uuid:entity.uuid,performance:blob})
+				sys.resolve({uuid:entity.uuid,puppet:{busy:true}})
+				entity.puppet.busy = true // @todo hack force faster
+			})
+
+			// only send to one for now
+			break
+		}
 	}
 }
 

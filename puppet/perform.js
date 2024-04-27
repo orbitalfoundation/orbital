@@ -30,15 +30,11 @@ const BREAK_PAD = 100
 
 export async function perform(args) {
 
+	// time
+	const performance_now = performance.now() * 1000
+
 	// get queue if exists
 	const queue = args.queue
-
-	// I'm finding that the bot gets heavily overloaded with too many requests
-	// let's actually just throw away traffic on the queue if we get too much; keep only one conversation
-	// if(queue) {
-	//	for(let i = 0; i < queue.length; i++) {
-	//	}
-	// }
 
 	// test: async promote audio blobs early since there are huge delays here
 	// @todo probably want a totally different way of streaming audio
@@ -47,7 +43,7 @@ export async function perform(args) {
 			if(perf.audio && !perf.audio_preload_started) {
 				//console.log("audio preloading ",perf.sentence)
 				perf.audio_preload_started = true
-				const before = performance.now() * 1000
+				const before = performance_now
 				const success = (audio) => {
 					const after = performance.now() * 1000
 					const duration = audio.duration * 1000
@@ -64,17 +60,20 @@ export async function perform(args) {
 		})
 	}
 
-	// stopping a performance callback
-	const done = () => {
-		//console.log("******* done",performance.now()*1000)
-		if(queue) queue.shift()
-	}
-
 	// look at current performance on stack
 	let perf = queue && queue.length ? queue[0] : null
 
+	// stopping a performance callback
+	const done = () => {
+		const performance_now = performance.now() * 1000
+		console.log("puppet::perform done",performance_now,perf)
+		if(queue) queue.shift()
+		return
+	}
+
 	// corrupt performance?
 	if(perf && perf.corrupt) {
+		console.error("puppet::perform corrupt at time",perf,performance_now)
 		done()
 		perf = null
 	}
@@ -82,17 +81,16 @@ export async function perform(args) {
 	// a time delay packet?
 	if(perf && perf.hasOwnProperty('break')) {
 		const delay = perf.break || 100
+		console.log("puppet::perform break at time",delay,performance_now)
 		delete perf.break
 		perf = null
 		setTimeout(done,delay)
-		if(window.recognizer_suspend) window.recognizer_suspend(delay + BREAK_PAD )
-		//console.log("****** time delay",delay)
 	}
 
 	// start audio performance?
 	if(perf && perf.audio) {
 		if(!perf.audio_loaded) {
-			//console.warn("*** waiting for audio to load",perf.sentence)
+			console.warn("*** waiting for audio to load at time",perf.sentence,performance_now)
 			// do not start the performance yet; do nothing
 			perf = null
 		} else if(!perf.duration) {
@@ -101,10 +99,9 @@ export async function perform(args) {
 			perf = null
 		} else {
 			audio_play(perf,done)
-			perf.starttime = performance.now() * 1000
+			perf.starttime = performance_now
 			delete perf.audio
-			console.log("*** audio playing sentence now...",perf.sentence,perf.starttime,perf.duration)
-			if(window.recognizer_suspend) window.recognizer_suspend(perf.duration + BREAK_PAD )
+			console.log("*** audio playing sentence,start,duration,now",perf.sentence,perf.starttime,perf.duration,performance_now)
 		}
 	}
 

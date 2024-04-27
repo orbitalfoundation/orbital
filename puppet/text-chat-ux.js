@@ -1,4 +1,6 @@
 
+const isServer = typeof window === 'undefined'
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 ///
 /// conversation support; text and voice, pushes events to sys
@@ -55,6 +57,7 @@ function onchange(event,parent,sys) {
 			text:value
 		}
 	})
+	console.log("text: sending conversation",value)
 
 	// @todo paint this below as a result of observing traffic rather than doing it now - so it networks...
 
@@ -70,8 +73,6 @@ function onchange(event,parent,sys) {
 	history.appendChild(elem)
 	if(history.children.length>4) history.removeChild(history.firstChild)
 }
-
-import { voice_recognizer } from './voice_recognizer.js'
 
 export const puppet_text_chat_ux = {
 	uuid:'@orbital/puppet/text-chat-ux',
@@ -94,8 +95,9 @@ export const puppet_text_chat_ux = {
 				onclick: (args)=>{
 					const a = args.target.parentNode.children[0].style
 					const b = args.target.parentNode.children[1].style
-					a.display = b.display = a.display == 'block' ? 'none' : 'block'
-					voice_recognizer(a.display == 'block' ? true : false )
+					const state = a.display == 'block'
+					a.display = b.display = state ? 'none' : 'block'
+					sys.resolve({voice_recognizer:!state})
 				}
 			}
 		]

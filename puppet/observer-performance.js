@@ -13,17 +13,30 @@ export const observer = {
 		if(isServer) return
 		if(args.blob.tick) return
 		if(!args.blob.performance) return
-		const entities = args.sys.query({uuid:args.blob.uuid}) // note this should only return one candidate
-		entities.forEach(entity=>{
-			if(!entity.puppet) return
-			if(!entity.puppet.queue) entity.puppet.queue=[]
-			entity.puppet.queue.push(args.blob.performance) // note that args.entity.performance is volatile
-		})
+
+		// find one candidate
+		const entities = args.sys.query({uuid:args.blob.uuid})
+		if(!entities || !entities.length) {
+			console.error("puppet performance - no entity found??")
+		}
+
+		// simply push packets onto that candidate
+		// note that we use args.blob.performance (passed args) since args.entity.performance (final state) will constantly change
+		for(const entity of entities) {
+			if(!entity.puppet || !entity.puppet.reason) {
+				console.error("puppet performance something is horribly wrong",entity)
+				continue
+			} else {
+				if(!entity.puppet.queue) entity.puppet.queue=[]
+				entity.puppet.queue.push(args.blob.performance)
+				break
+			}
+		}
 	}
 }
 
 ///
-/// observe every tick on client and may dequeue events
+/// observe every tick
 ///
 
 export const puppet_client_side_tick = {
@@ -31,9 +44,13 @@ export const puppet_client_side_tick = {
 	observer: (args) => {
 		if(isServer) return
 		if(!args.blob.tick) return
+
+		// get all entities that are puppets
 		const entities = args.sys.query({puppet:true})
+
+		// update each one
 		entities.forEach( (entity) => {
-			const done = perform({
+			perform({
 				     node: entity.volume._node,
 				      vrm: entity.volume._vrm,
 				    queue: entity.puppet.queue,
@@ -41,5 +58,42 @@ export const puppet_client_side_tick = {
 					delta: args.blob.delta,
 			})
 		})
+	}
+}
+
+///
+/// a helper that will turn off voice recognition and also mark puppets as busy or not
+/// the hope here is to prevent puppets from hearing themseves or getting bogged down too much with requests
+///
+
+let voice_busy = false
+
+export const puppet_client_busy_tick = {
+	about: 'puppet tick busy observer - client side',
+	observer: (args) => {
+		if(isServer) return
+		if(!args.blob.tick) return
+		const sys = args.sys
+
+		// get all entities that are puppets
+		const entities = args.sys.query({puppet:true})
+
+		let busy_state = false
+		entities.forEach( (entity) => {
+			if(entity.puppet.queue && entity.puppet.queue.length) {
+				busy_state = true
+			} else {
+				if(entity.puppet.busy == true) {
+					console.log("performance busy checker: marking puppet as NOT busy",entity)
+					sys.resolve({ uuid:entity.uuid, puppet:{ busy: false } })
+				}
+			}
+		})
+
+		if(voice_busy != busy_state) {
+			voice_busy = busy_state
+			console.log("performance busy checker: stopping voice? false is stopped=",!busy_state)
+			sys.resolve({ voice_recognizer: !busy_state })
+		}
 	}
 }

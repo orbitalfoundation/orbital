@@ -64,7 +64,7 @@ export function lipsyncQueue(text, lipsyncLang = "en", onsubtitles = null, exclu
 	let lipsyncAnim = []; // Lip-sync animation sequence
 	const letters = [...text];
 
-	const queue = []
+	let queue = new Array()
 
 	for( let i=0; i<letters.length; i++ ) {
 		const isLast = i === (letters.length-1);
