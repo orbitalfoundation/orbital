@@ -38,10 +38,12 @@ function navigate(event,entity,sys) {
 	transform.target_xyz = xyz
 	transform.target_ypr = ypr
 
-	// @todo technically i don't need to do the below since volume is reactive ... need to think about networking however
+	// broadcast changes
 	sys.resolve({
 		uuid: entity.uuid,
-		volume: entity.volume
+		volume: {
+			transform: { xyz }
+		}
 	})
 
 }

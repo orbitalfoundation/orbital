@@ -60,18 +60,18 @@ export class Sys {
 		// configure the initial event pipeline
 		//
 	
-		const accumulate = new OnAccumulate()
+		const raw = new OnRaw()
 		const uuids = new OnUUID()
 		const dependencies = new OnDependencies(config.importmaps)
 		const outsiders = new OnOutsiders()
 
-		accumulate.subsequent.push(uuids.chain.bind(uuids))
+		raw.subsequent.push(uuids.chain.bind(uuids))
 		uuids.subsequent.push(dependencies.chain.bind(dependencies))
 		dependencies.subsequent.push(outsiders.chain.bind(outsiders))
 
 		const sys = this
 		this.resolve = async (blob) => {
-			await accumulate.chain({blob,sys})
+			await raw.chain({blob,sys})
 		}
 
 	}
@@ -90,8 +90,8 @@ export class Sys {
 		await this.resolve(tick)
 		if(false) {
 			// we don't use this right now - it is for a two phase action/reaction approach - right now i react immediately instead
-			const blobs = this.accumulate.blobs
-			this.accumulate.blobs = []
+			const blobs = this.raw.blobs
+			this.raw.blobs = []
 			blobs.unshift(tick)
 			for(const blob of blobs) {
 				let args = {blob,sys,time,delta}
@@ -162,9 +162,9 @@ export class Sys {
 ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class OnAccumulate {
+class OnRaw {
 
-	content = 'accumulate inbound state into a transient cache to separate incoming activity from reaction to that activity'
+	content = 'catch raw inbound state into a transient cache - separate incoming activity from reaction to that activity'
 	subsequent = []
 
 	async chain(args) {	
@@ -172,7 +172,7 @@ class OnAccumulate {
 		let {blob,sys} = args
 
 		if(!blob) {
-			error('sys:accumulate: empty input')
+			error('sys:raw: empty input')
 			return
 		}
 
@@ -184,12 +184,12 @@ class OnAccumulate {
 		}
 
 		if(typeof blob === 'function') {
-			//warn('sys::accumulate functions not supported yet')
+			//warn('sys::raw functions not supported yet')
 			return
 		}
 
 		if( typeof blob !== 'object') {
-			error('sys::accumulate: subject is not an entity?',blob)
+			error('sys::raw: subject is not an entity?',blob)
 			return
 		}
 
@@ -198,7 +198,7 @@ class OnAccumulate {
 			try {
 				args.blob = deepAppend(blob)
 			} catch(err) {
-				error('sys:accumulate: deepcopy error',err)
+				error('sys:raw: deepcopy error',err)
 			}
 		}
 
@@ -212,11 +212,12 @@ class OnAccumulate {
 //
 // note this fails to deal with deletions
 // @todo maybe structuredClone to copy simple types also
+// @todo finish visited[] loop prevention
 //
 
 function deepAppend(source,target={},visited=[]) {
 
-	if(!source) {
+	if(!source || !target) {
 		console.error("sys: corrupt input")
 		return source
 	}
@@ -274,25 +275,13 @@ function deepAppend(source,target={},visited=[]) {
 	return target
 }
 
-/*
-for(let [key,props] of Object.entries(blob)) {
-	if(props && !Array.isArray(props) && typeof props === 'object') {
-		const eprops = entity[key]
-		if(eprops && !Array.isArray(eprops) && typeof eprops === 'object') {
-			Object.assign(eprops,props)
-			continue
-		}
-	}
-	// for simple types just obliterate previous contents with new contents
-	entity[key]=props
-}
-*/
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// OnEntity - handle raw datagrams coming in and grant uuids if desired and store in a database
+//
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-// OnEntity - handle raw datagrams coming in and grant uuids to each
-//
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+let uuidcounter = 1
 
 class OnUUID {
 
@@ -330,7 +319,13 @@ class OnUUID {
 
 		blob._now = performance.now() * 1000
 
-		// return if no uuid; nothing to really do; set a few props
+		// blob may specify to generate a uuid
+		// @todo could look at parent also later and generate one that is based on hierarchy
+		if(blob.hasOwnProperty('uuid') && !blob.uuid) {
+			blob.uuid = `${uuidcounter++}-${sys.systemid}`
+		}
+
+		// done this stage if no uuid; nothing to really do
 		let uuid = blob.uuid
 		if(!uuid) {
 			blob._updated = time

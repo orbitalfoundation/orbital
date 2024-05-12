@@ -2,13 +2,17 @@
 
 import { synthesize } from './tts-synth.js'
 
+///
+/// @todo for some reason this approach is extraordinarily slow
+///
+
 export async function audio_preload(args,success,fail) {
 	try {
 		let audio = new Audio()
 		const load = () => {
 			return new Promise((resolve) => {
 				audio.addEventListener("loadedmetadata",resolve)
-				audio.src = args.audio
+				audio.src = "data:audio/wav;base64," + args.audio
 			})
 		}
 		await load()

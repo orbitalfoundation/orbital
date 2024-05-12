@@ -21,13 +21,26 @@ const im = document.createElement('script')
 im.src = "@orbital/volume-3js/meshopt_decoder.js"
 document.head.append(im)
 
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+
+import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
+
+/*
 import * as THREE from './libs/three/three.module.js'
 import { GLTFLoader } from './libs/three/jsm/loaders/GLTFLoader.js'
 import { KTX2Loader } from './libs/three/jsm/loaders/KTX2Loader.js'
 import { DRACOLoader } from './libs/three/jsm/loaders/DRACOLoader.js'
-import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
 import { OrbitControls } from './libs/three/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from './libs/three/jsm/environments/RoomEnvironment.js'
+
+import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
+*/
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -120,6 +133,9 @@ class VolumeManager {
 		const near = 0.01
 		const far = 100
 		const camera = this.camera = new THREE.PerspectiveCamera(fov, aspect, near, far)
+		//scene.add(camera)
+		scene.camera = camera
+		scene.parentDiv = parentDiv
 
 		if(true) {
 			this.controls = new OrbitControls( this.camera, this.renderer.domElement )

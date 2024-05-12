@@ -19,7 +19,7 @@ export class TalkingHeadAnimate {
   * @param {Object} node DOM element of the avatar
   * @param {Object} [opt=null] Global/default options
   */
-  constructor(node, opt = null ) {
+  constructor(node = null, opt = null ) {
 
     this.nodeAvatar = node;
 
@@ -105,7 +105,7 @@ export class TalkingHeadAnimate {
     this.animTimeLast = 0;
     this.easing = this.sigmoidFactory(5); // Ease in and out
 
-    setupIKMesh()
+    this.setupIKMesh()
   }
 
   setupIKMesh() {
@@ -133,33 +133,6 @@ export class TalkingHeadAnimate {
   }
 
   /**
-  * Convert internal notation to THREE objects.
-  * NOTE: All rotations are converted to quaternions.
-  * @param {Object} p Pose
-  * @return {Object} A new pose object.
-  */
-  propsToThreeObjects(p) {
-    const r = {};
-    for( let [key,val] of Object.entries(p) ) {
-      const ids = key.split('.');
-      let v;
-      if ( ids[1] === 'position' || ids[1] === 'scale' ) {
-        v = new THREE.Vector3(val.x,val.y,val.z);
-      } else if ( ids[1] === 'rotation' ) {
-        key = ids[0] + '.quaternion';
-        v = new THREE.Quaternion().setFromEuler(new THREE.Euler(val.x,val.y,val.z,'XYZ')).normalize();
-      } else if ( ids[1] === 'quaternion' ) {
-        v = new THREE.Quaternion(val.x,val.y,val.z,val.w).normalize();
-      }
-      if (v) {
-        r[key] = v;
-      }
-    }
-
-    return r;
-  }
-
-  /**
   * Loader for 3D avatar model.
   * @param {string} avatar Avatar object with 'url' property to GLTF/GLB file.
   * @param {progressfn} [onprogress=null] Callback for progress
@@ -175,11 +148,17 @@ export class TalkingHeadAnimate {
     const loader = new GLTFLoader();
     let gltf = await loader.loadAsync( avatar.url, onprogress );
 
+    useAvatar(gltf.scene)
+    return gltf.scene
+  }
+
+  useAvatar(avatar) {
+
     // Check the gltf
     const required = [ this.opt.modelRoot ];
     this.posePropNames.forEach( x => required.push( x.split('.')[0] ) );
     required.forEach( x => {
-      if ( !gltf.scene.getObjectByName(x) ) {
+      if ( !avatar.getObjectByName(x) ) {
         throw new Error('Avatar object ' + x + ' not found');
       }
     });
@@ -190,7 +169,7 @@ export class TalkingHeadAnimate {
     this.mixer = null;
 
     // Avatar full-body
-    this.armature = gltf.scene.getObjectByName( this.opt.modelRoot );
+    this.armature = avatar.getObjectByName( this.opt.modelRoot );
     this.armature.scale.setScalar(1);
 
     // Morph targets
@@ -242,8 +221,6 @@ export class TalkingHeadAnimate {
 
     // Set pose and start animation
     this.setMood( this.avatar.avatarMood || this.moodName || this.opt.avatarMood );
-
-    return gltf.scene
   }
 
   /**
@@ -519,6 +496,20 @@ export class TalkingHeadAnimate {
     }
   }
 
+  /**
+  * Reset all the visemes only
+  */
+  resetLips() {
+    this.visemeNames.forEach( x => {
+      this.morphs.forEach( y => {
+        const ndx = y.morphTargetDictionary['viseme_'+x];
+        if ( ndx !== undefined ) {
+          y.morphTargetInfluences[ndx] = 0;
+        }
+      });
+    });
+  }
+
 
   /**
   * Get mood names.
@@ -561,8 +552,6 @@ export class TalkingHeadAnimate {
     });
 
   }
-
-// THIS IS NOT USED XXX
 
   /**
   * Get morph target names.
@@ -844,9 +833,21 @@ export class TalkingHeadAnimate {
   }
 
   /**
+   * Animate forward time
+   */
+  animateTime(t) {
+    let dt = t - this.animTimeLast;
+    if ( dt < this.animFrameDur ) return 0;
+    dt = dt / this.animSlowdownRate;
+    this.animClock += dt;
+    this.animTimeLast = t;
+    return dt
+  }
+
+  /**
   * Build a list of chores to perform
   */
-  buildPerformanceList() {
+  animateBuildList() {
 
     // Randomize facial expression
     if ( this.viewName !== 'full' ) {
@@ -948,13 +949,15 @@ export class TalkingHeadAnimate {
   /**
    * Update performance
    */
-  updatePerformance(mt,x) {
+  _animateBodyInternal(mt,x) {
     if ( mt === 'subtitles' ) {
-//      if( this.onSubtitles && typeof this.onSubtitles === "function" ) {
-//        this.onSubtitles(""+x);
-//      }
+      // done at caller scope instead
+      //      if( this.onSubtitles && typeof this.onSubtitles === "function" ) {
+      //        this.onSubtitles(""+x);
+      //      }
     } else if ( mt === 'speak' ) {
-//      this.speakText(""+x);
+      // done at caller scope instead
+      //      this.speakText(""+x);
     } else if ( mt === 'pose' ) {
       this.poseName = ""+x;
       this.setPoseFromTemplate( this.poseTemplates[ this.poseName ] );
@@ -995,11 +998,11 @@ export class TalkingHeadAnimate {
   /**
   * animate avatar
   */
-  animateAvatar(o) {
+  animateBody(o) {
 
     // Update values
     for( let [mt,x] of Object.entries(o) ) {
-    	this.updatePerformance(mt,x)
+    	this._animateBodyInternal(mt,x)
     }
 
     // Animate
@@ -1041,7 +1044,9 @@ export class TalkingHeadAnimate {
   lookAt(x,y,t) {
 
   	// camera may not exist
-  	if(!this.camera) return
+  	if(!this.camera || !this.nodeAvatar) {
+      return
+    }
 
     // Eyes position
     const rect = this.nodeAvatar.getBoundingClientRect();
@@ -1119,6 +1124,8 @@ export class TalkingHeadAnimate {
   * @return {Boolean} If true, (x,y) touch the avatar
   */
   touchAt(x,y) {
+
+    if(!this.nodeAvatar) return
 
     const rect = this.nodeAvatar.getBoundingClientRect();
     const pointer = new THREE.Vector2(

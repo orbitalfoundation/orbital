@@ -1,99 +1,95 @@
 
-import { perform } from './perform.js'
-
 const isServer = typeof window === 'undefined'
 
+// Talking Heads - by Mika Suominen
+import { TalkingHeadArticulate } from './TalkingHead/modules/talkinghead-articulate.mjs'
+
 ///
-/// queue inbound puppet performance events for playback on client
+/// pass inbound performance requests onwards
 ///
 
-export const observer = {
-	about: 'puppet observer performance - client side',
+export const puppet_client_side_performance_observer = {
+	about: 'puppet observer - client side',
 	observer: (args) => {
 		if(isServer) return
 		if(args.blob.tick) return
 		if(!args.blob.performance) return
-
-		// find one candidate
-		const entities = args.sys.query({uuid:args.blob.uuid})
+		const entities = args.sys.query({uuid:args.blob.performance.targetuuid})
 		if(!entities || !entities.length) {
-			console.error("puppet performance - no entity found??")
+			console.error("puppet performance - no entity found??",args)
+			return
 		}
-
-		// simply push packets onto that candidate
-		// note that we use args.blob.performance (passed args) since args.entity.performance (final state) will constantly change
 		for(const entity of entities) {
-			if(!entity.puppet || !entity.puppet.reason) {
-				console.error("puppet performance something is horribly wrong",entity)
-				continue
-			} else {
-				if(!entity.puppet.queue) entity.puppet.queue=[]
-				entity.puppet.queue.push(args.blob.performance)
-				break
-			}
+			helper1(entity,args.blob.performance)
+			break
 		}
 	}
 }
 
+const helper1 = (entity,perf) => {
+
+	if(!entity.puppet || !entity.volume || !entity.volume._node) {
+		console.error("puppet::perform target entity has no puppet or volume or is not ready",entity)
+		return
+	}
+
+	let handler = entity.puppet._handler
+	if(!handler) {
+		let div = entity.volume._node.parent.parentDiv
+		handler = entity.puppet._handler = new TalkingHeadArticulate(div)
+		handler.useAvatar(entity.volume._node)
+		handler.camera = entity.volume._node.parent.camera
+		console.log(entity.volume._node)
+	}
+
+	const blob = perf.whisper || {}
+	if(perf.audio) blob.audio = perf.audio
+	handler.speakAudio(blob)
+}
+
 ///
-/// observe every tick
+/// observe ticks
 ///
 
-export const puppet_client_side_tick = {
+export const puppet_client_side_tick_observer = {
 	about: 'puppet tick observer - client side',
 	observer: (args) => {
 		if(isServer) return
 		if(!args.blob.tick) return
-
-		// get all entities that are puppets
 		const entities = args.sys.query({puppet:true})
-
-		// update each one
 		entities.forEach( (entity) => {
-			perform({
-				     node: entity.volume._node,
-				      vrm: entity.volume._vrm,
-				    queue: entity.puppet.queue,
-				     time: args.blob.time,
-					delta: args.blob.delta,
-			})
+			helper2(entity,args)
 		})
 	}
 }
 
-///
-/// a helper that will turn off voice recognition and also mark puppets as busy or not
-/// the hope here is to prevent puppets from hearing themseves or getting bogged down too much with requests
-///
+const helper2 = (entity,args) => {
 
-let voice_busy = false
+	// do nothing if no art
+	if(!entity.volume._node) return
 
-export const puppet_client_busy_tick = {
-	about: 'puppet tick busy observer - client side',
-	observer: (args) => {
-		if(isServer) return
-		if(!args.blob.tick) return
-		const sys = args.sys
+	let handler = entity.puppet._handler
+	if(!handler) {
+		let div = entity.volume._node.parent.parentDiv
+		handler = entity.puppet._handler = new TalkingHeadArticulate(div)
+		handler.useAvatar(entity.volume._node)
+		handler.camera = entity.volume._node.parent.camera
+		console.log(entity.volume._node)
+	}
 
-		// get all entities that are puppets
-		const entities = args.sys.query({puppet:true})
+	// perform animation over time
+    let dt = handler.animateTime(args.blob.time)
+    if(dt) {
+		const o = handler.animateBuildList()
+		handler.animateSpeech(o)
+		handler.animateBody(o)
+    }
 
-		let busy_state = false
-		entities.forEach( (entity) => {
-			if(entity.puppet.queue && entity.puppet.queue.length) {
-				busy_state = true
-			} else {
-				if(entity.puppet.busy == true) {
-					console.log("performance busy checker: marking puppet as NOT busy",entity)
-					sys.resolve({ uuid:entity.uuid, puppet:{ busy: false } })
-				}
-			}
-		})
-
-		if(voice_busy != busy_state) {
-			voice_busy = busy_state
-			console.log("performance busy checker: stopping voice? false is stopped=",!busy_state)
-			sys.resolve({ voice_recognizer: !busy_state })
-		}
+	// clear busy flag if done
+	if(!handler.isSpeaking && entity.puppet.busy) {
+		entity.puppet.busy = false
+		sys.resolve({ uuid:entity.uuid, puppet:{ busy: false } })
+		console.log("puppet::perform clearing busy flag for",entity.uuid)
 	}
 }
+

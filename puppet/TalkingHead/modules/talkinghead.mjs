@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Stats from 'three/addons/libs/stats.module.js';
 
-import { TalkingHeadArticulate } from './TalkingHeadArticulate.mjs'
+import { TalkingHeadArticulate } from './talkinghead-articulate.mjs'
 
 /**
 * @class Talking Head
@@ -161,7 +161,8 @@ class TalkingHead extends TalkingHeadArticulate {
     this.controls.autoRotateSpeed = 0;
     this.controls.autoRotate = false;
     this.controls.update();
-    this.cameraClock = null;    
+    this.cameraClock = null;
+
   }
 
   /**
@@ -177,21 +178,20 @@ class TalkingHead extends TalkingHeadArticulate {
       return;
     }
 
-    // Delta time
-    let dt = t - this.animTimeLast;
-    if ( dt < this.animFrameDur ) return;
-    dt = dt / this.animSlowdownRate;
-    this.animClock += dt;
-    this.animTimeLast = t;
-
     // Statistics start
     if ( this.stats ) {
       this.stats.begin();
     }
 
-    const o = this.buildPerformanceList()
-    this.animateSpeech(o)
-    this.animateAvatar(o)
+    // Advance animation
+    let dt = this.animateTime(t)
+    if(dt) {
+      const o = this.animateBuildList()
+      this.animateSpeech(o)
+      this.animateBody(o)
+    } else {
+      return
+    }
 
     // Camera
     if ( this.cameraClock !== null && this.cameraClock < 1000 ) {
@@ -257,6 +257,7 @@ class TalkingHead extends TalkingHeadArticulate {
   * Resize avatar.
   */
   onResize() {
+    this.boundingRect = nodeAvatar.getBoundingClientRect()
     this.camera.aspect = this.nodeAvatar.clientWidth / this.nodeAvatar.clientHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize( this.nodeAvatar.clientWidth, this.nodeAvatar.clientHeight );

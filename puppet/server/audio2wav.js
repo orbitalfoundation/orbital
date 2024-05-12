@@ -1,3 +1,5 @@
+// https://www.npmjs.com/package/audio-buffer
+
 export function audioBufferToWav(audioBuffer) {
   const numberOfChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;

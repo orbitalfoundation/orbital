@@ -9,73 +9,61 @@ const isServer = typeof window === 'undefined'
 ///
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-/*
-const clickme_unused = {
-	paper:true,
-	uuid:'cloudcity/clickme',
-	css:`
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		height: 100vh;
-		margin: 0;
-		`,
-	children: [
-		{
-			kind:'button',
-			css:`
-				padding: 20px 40px;
-				font-size: 24px;
-				border: none;
-				border-radius: 5px;
-				background-color: #007BFF;
-				color: white;
-				cursor: pointer;
-				transition: background-color 0.3s;
-			`,
-			//		.centered-button:hover { background-color: #0056b3; } @todo enable this concept
-			content:`Click Me`
+const text_chat_uuid = '@orbital/puppet/text-chat-ux'
+
+export const text_observer = {
+	about: 'text observer',
+
+	observer: (args) => {
+		if(isServer) return
+		if(args.blob.tick) return
+		if(!args.blob.conversation) return
+
+		const target = document.getElementById(text_chat_uuid)
+		if(!target) {
+			console.log("text observer: weird no target")
+			return
 		}
-	],
-	onclick: (args)=>{
-		console.log(args)
-		// @todo can i remove this?
+
+		// @todo 'paper' should be reactive ideally
+		// const elem = { kind:'div', css:'font-size:2em', content:value }
+		//if(chatbox.children.length>5) chatbox.children.shift()
+		//chatbox.children.splice(chatbox.children.length-1,0,elem)
+
+		// hack around the lack of reactivity of 'paper'
+		const elem = document.createElement('div')
+		elem.innerHTML=args.blob.conversation.text
+		const history = target.children[0]
+		history.appendChild(elem)
+		if(history.children.length>4) history.removeChild(history.firstChild)
 	}
 }
-*/
+
 
 function onchange(event,parent,sys) {
 	if(!event || !event.target || !event.target.value.length) return
 	const value = event.target.value
 	event.target.value = ''
 
-	// network the event
+	const speakers = sys.query({uuid:sys.systemid})
+
+	if(!speakers || !speakers.length || !speakers[0].volume || !speakers[0].volume.transform || !speakers[0].volume.transform.xyz) {
+		console.error("text chat: bad speaker?",speakers)
+		return
+	}
+
 	sys.resolve({
-		// @todo supply a uuid of whom this is refering to - the sponsor basically
+		uuid: null,
 		conversation:{
-			sponsor:null,
+			sponsor:speakers[0].uuid,
+			xyz:speakers[0].volume.transform.xyz,
 			text:value
 		}
 	})
-	console.log("text: sending conversation",value)
-
-	// @todo paint this below as a result of observing traffic rather than doing it now - so it networks...
-
-	// @todo 'paper' should be reactive ideally
-	// const elem = { kind:'div', css:'font-size:2em', content:value }
-	//if(chatbox.children.length>5) chatbox.children.shift()
-	//chatbox.children.splice(chatbox.children.length-1,0,elem)
-
-	// hack around the lack of reactivity of 'paper'
-	const elem = document.createElement('div')
-	elem.innerHTML=value
-	const history = event.target.parentNode.children[0]
-	history.appendChild(elem)
-	if(history.children.length>4) history.removeChild(history.firstChild)
 }
 
 export const puppet_text_chat_ux = {
-	uuid:'@orbital/puppet/text-chat-ux',
+	uuid: text_chat_uuid,
 	paper: {
 		css: 'position:absolute;bottom:8px;left:2%;width:95%;font-size:2em',
 		children: [
@@ -103,4 +91,3 @@ export const puppet_text_chat_ux = {
 		]
 	}
 }
-

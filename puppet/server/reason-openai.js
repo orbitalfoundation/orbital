@@ -1,6 +1,4 @@
 
-import { log,warn,error } from './log.js'
-
 export async function reason_openai(reason,prompt) {
 
 	try {
@@ -20,15 +18,15 @@ export async function reason_openai(reason,prompt) {
 		}
 		const response = await fetch(url,command)
 		if(!response.ok) {
-			error("puppet: reasoning error 1",response,reason)
+			console.error("puppet: reasoning error 1",response,reason)
 		} else {
 			const json = await response.json()
 			const text = json.choices[0].message.content
-			//log('puppet: reasoning success',text)
+			//console.log('puppet: reasoning success',text)
 			return text
 		}
 	} catch(err) {
-		error("puppet: reasoning error 2",err,reason)
+		console.error("puppet: reasoning error 2",err,reason)
 	}
 
 	return null

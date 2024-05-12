@@ -45,7 +45,7 @@ const samples = {
 }
 
 function skipID3 (buffer) {
-  // http://id3.org/d3v2.3.0
+  // http://id3.org/d3v2.3.0 - the first few bytes are ID3 or 49 44 33
   if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) { // ID3
     const id3v2Flags = buffer[5]
     const footerSize = (id3v2Flags & 0x10) ? 10 : 0
@@ -91,14 +91,14 @@ function parseFrameHeader (b1,b2) {
   }
 }
 
-export function getmp3duration(buffer) {
+export function mp3duration(buffer) {
   if(buffer.length < 100) {
     console.log("short",buffer)
     return 0
   }
   let offset = skipID3(buffer)
   if(offset == 0) {
-    console.log("noid3",buffer)
+    console.log("Is this an mp3? no ID3? ... ",buffer)
     return 0
   }
   let duration = 0

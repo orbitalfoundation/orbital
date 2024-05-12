@@ -1,41 +1,68 @@
 
-import { phonemesToVisemesAtTime, visemes_realusion } from './utils/text-visemes.js'
+// thinking about refactoring my puppet logic to be more similar to talking heads ... work in progress
+// this would be the new framing
 
-import { animMoods } from '../TalkingHead/modules/anim-moods.mjs'
+import { Audio } from './Audio.js'
+import { lipsyncConvert } from '../TalkingHead/modules/lipsync-queue.mjs'
 
-import { audio_preload, audio_play } from './utils/audio-play.js'
+export class Puppet {
 
-const clamp = (num, a, b) => Math.max(Math.min(num, Math.max(a, b)), Math.min(a, b));
+	isSpeaking = false
+	speechQueue = []
+	audio = new Audio()
 
-const lerp = (arr,i,target,rate,delta) => {
-	if(arr[i] == target) return
-	arr[i] += (target-arr[i])*rate
+	constructor() {
+	}
+
+	useAvatar(node) {
+	}
+
+	speakAudio(blob,lipsyncLang="en") {
+	}
+
+	animateTime(time) {
+	}
+
+	animateBuildList() {
+	}
+
+	animateSpeech() {
+    }
+
+	animateBody() {
+	}
+
 }
 
-const rest = (parts,delta) => {
-	parts.forEach(part=>{
-		Object.entries(part.morphTargetDictionary).forEach(([k,v])=>{
-			lerp(part.morphTargetInfluences,v,0,0.1,delta)
+// historically i was doing something like this at a higher level
+// but it does make sense to have the queue managed locally with a stateful class
+
+/*
+
+	// puppet?
+	else if(true) {
+
+		// apply performance using a standalone piece of code that is decoupled from orbital proper
+		perform({
+			     node: entity.volume._node,
+			      vrm: entity.volume._vrm,
+			    queue: entity.puppet.queue,
+			     time: args.blob.time,
+				delta: args.blob.delta,
 		})
-	})
-}
 
-const BREAK_PAD = 100
+		// detect and clear busy flag if set
+		if(entity.puppet.queue && !entity.puppet.queue.length && entity.puppet.busy) {
+			entity.puppet.busy = false
+			sys.resolve({ uuid:entity.uuid, puppet:{ busy: false } })
+			console.log("puppet::perform clearing busy flag for",entity.uuid)
+		}
+	}
 
-///
-/// resolve queue
-///
-/// this function is async, but will be called synchronously, it will resolve the queue on its own timeframe however
-///
+*/
 
-export async function perform(args) {
 
-	// time
-	const performance_now = performance.now() * 1000
-
-	// get queue if exists
-	const queue = args.queue
-
+/*
 	// test: async promote audio blobs early since there are huge delays here
 	// @todo probably want a totally different way of streaming audio
 	if(queue) {
@@ -59,11 +86,51 @@ export async function perform(args) {
 			}
 		})
 	}
+*/
 
-	// look at current performance on stack
+/*
+
+// this was the previous lower level
+
+import { phonemesToVisemesAtTime, visemes_realusion } from './phonemes2visemes.js'
+
+import { animMoods } from '../TalkingHead/modules/anim-moods.mjs'
+
+import { audio_preload, audio_play } from './audio-play.js'
+
+const clamp = (num, a, b) => Math.max(Math.min(num, Math.max(a, b)), Math.min(a, b));
+
+const lerp = (arr,i,target,rate,delta) => {
+	if(arr[i] == target) return
+	arr[i] += (target-arr[i])*rate
+}
+
+const rest = (parts,delta) => {
+	parts.forEach(part=>{
+		Object.entries(part.morphTargetDictionary).forEach(([k,v])=>{
+			lerp(part.morphTargetInfluences,v,0,0.1,delta)
+		})
+	})
+}
+
+///
+/// resolve queue
+///
+/// this function is async, but will be called synchronously, it will resolve the queue on its own timeframe however
+///
+
+export async function perform(args) {
+
+	// absolute time for debugging only
+	const performance_now = performance.now() * 1000
+
+	// get queue of work to do if any
+	const queue = args.queue
+
+	// look at current job on stack (not cleared till done job)
 	let perf = queue && queue.length ? queue[0] : null
 
-	// stopping a performance callback
+	// stopping a performance callback and moving to next if any
 	const done = () => {
 		const performance_now = performance.now() * 1000
 		console.log("puppet::perform done",performance_now,perf)
@@ -71,37 +138,39 @@ export async function perform(args) {
 		return
 	}
 
-	// corrupt performance?
-	if(perf && perf.corrupt) {
-		console.error("puppet::perform corrupt at time",perf,performance_now)
-		done()
-		perf = null
-	}
-
-	// a time delay packet?
+	// a time delay?
 	if(perf && perf.hasOwnProperty('break')) {
 		const delay = perf.break || 100
-		console.log("puppet::perform break at time",delay,performance_now)
 		delete perf.break
 		perf = null
 		setTimeout(done,delay)
+		console.log("puppet::perform break at time",delay,performance_now)
 	}
 
-	// start audio performance?
+	// start performance?
 	if(perf && perf.audio) {
+
+		// previous audio scheme had huge delays - i have not validated any new approach yet but this is obsolete
 		if(!perf.audio_loaded) {
 			console.warn("*** waiting for audio to load at time",perf.sentence,performance_now)
 			// do not start the performance yet; do nothing
 			perf = null
 		} else if(!perf.duration) {
-			//console.error("*** no audio duration",perf.sentence)
+			console.error("*** no audio duration",perf.sentence)
 			done()
 			perf = null
 		} else {
 			audio_play(perf,done)
-			perf.starttime = performance_now
+			perf.starttime = args.time
 			delete perf.audio
 			console.log("*** audio playing sentence,start,duration,now",perf.sentence,perf.starttime,perf.duration,performance_now)
+
+			// convert words to talkinghead visemes on the client (this could be done earlier in the pipeline also)
+			const blob = lipsyncConvert(perf,"en")
+			console.log("*** audio the performance is",blob)
+
+			- do something with blob
+
 		}
 	}
 
@@ -110,6 +179,7 @@ export async function perform(args) {
 	const vrm = args.vrm
 	const phonemes = perf ? perf.phonemes : null
 	const emotion = perf ? perf.emotion : null
+	const duration = perf ? perf.duration : 0
 	const starttime = perf ? perf.starttime : 0
 	const time = args.time
 	const delta = args.delta
@@ -120,8 +190,9 @@ export async function perform(args) {
 	}
 
 	// initialize parts once if any - tidy up later @todo
+	// @todo not vrm compat exactly
 	if(!node.parts) {
-		initMorphTargets(node)
+		_initMorphTargetsForFace(node)
 	}
 
 	// @todo revise
@@ -164,7 +235,7 @@ export async function perform(args) {
 	}
 
 	//
-	// vrm - do vrm visemes a different way
+	// vrm - do vrm visemes a slightly different way
 	//
 	// VRM is actually gltf with some extensions
 	// there is a javascript library that has its one morph target concept called a VRMExpression
@@ -226,7 +297,7 @@ export async function perform(args) {
 	return true
 }
 
-function initMorphTargets(node) {
+function _initMorphTargetsForFace(node) {
 
 	const parts = node.parts = []
 
@@ -250,16 +321,16 @@ function initMorphTargets(node) {
 
 	partnames.forEach(name => {
 		let part = node.getObjectByName(name)
-		if(!part) return
+		if(!part || !part.morphTargetDictionary) return
 		part.visemeIndex = part.morphTargetDictionary['viseme_sil']
 		if(part.visemeIndex >= 0) {
-			//console.log("puppet init - found part",name,part)
+			console.log("puppet init - found rpm viseme index on part",name,part)
 			parts.push(part)
 		} else {
 			part.visemeIndex = part.morphTargetDictionary["EE"]
 			if(part.visemeIndex >= 0) {
 				node.realusion = part.realusion = true
-				//console.log("puppet init - found part - reallusion",name,part)
+				console.log("puppet init - found reallusion viseme index on part",name,part)
 				parts.push(part)
 			}
 		}
@@ -269,3 +340,4 @@ function initMorphTargets(node) {
 
 }
 
+*/
