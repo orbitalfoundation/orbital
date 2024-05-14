@@ -1,5 +1,5 @@
 ///
-/// Turn english prose into visemes over time.
+/// Turn english prose into visemes over time - this is a selection of code from talking heads and is not used
 ///
 /// Modified from:
 ///

@@ -3,7 +3,7 @@ import { reason_openai } from './reason-openai.js'
 import { tts_openai } from './tts-openai.js'
 import { tts_coqui } from './tts-coqui.js'
 import { stt_whisper } from './stt-whisper.js'
-import { lipsyncQueue, lipsyncGetProcessor } from '../TalkingHead/modules/lipsync-queue.mjs'
+import { lipsyncQueue, lipsyncGetProcessor } from '../talkinghead/modules/lipsync-queue.mjs'
 import { mp3duration } from './mp3duration.js'
 
 let conversationCounter = 10000
@@ -31,6 +31,13 @@ export async function converse(utter,callback) {
 	let text = `${utter.text}`
 
 	console.log("puppet::converse got prompt",text)
+
+	if(text.startsWith('/emote')) {
+		const emotion = text.slice(6).trim()
+		console.log("puppet::converse command detected - emotion=",emotion)
+		callback({text,emotion})
+		return
+	}
 
 	//
 	// moderation and sanitization and sanity checks on user input

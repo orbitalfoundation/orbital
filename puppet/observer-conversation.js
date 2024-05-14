@@ -43,6 +43,7 @@ export const observer = {
 			}
 
 			// busy?
+			// @todo could look at how long it has been busy for as a way to avoid getting stuck in a busy state
 			if(entity.puppet.busy) {
 				console.warn("puppet::converse - puppet is too busy to talk",entity.uuid)
 				return
@@ -63,11 +64,10 @@ export const observer = {
 				// set the target uuid on the performance - i prefer to have performances be fresh entities
 				performance.targetuuid = targetuuid
 				// the text to speech is returned in many small fragments - send each one as a fresh new entity
-				sys.resolve({uuid:null,performance})
-				// also mark as busy at time - we needed some way to throttle the puppet and this seems reasonable
-				sys.resolve({uuid:targetuuid,puppet:{busy:Date.now()}})
-				entity.puppet.busy = true
 				// @todo i need some kind of mechanic to time out performance objects from the database or delete them
+				sys.resolve({uuid:null,performance})
+				// speculatively mark the puppet as busy to reduce traffic; done here to avoid latency loop back
+				sys.resolve({uuid:targetuuid,puppet:{busy:Date.now()}})
 			}
 
 			// have a more application neutral converse() method perform the text to speech (or reject)

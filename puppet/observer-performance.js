@@ -1,11 +1,14 @@
 
 const isServer = typeof window === 'undefined'
 
-// Talking Heads - by Mika Suominen
-import { TalkingHeadArticulate } from './TalkingHead/modules/talkinghead-articulate.mjs'
+import { Puppet } from './client/puppet-standalone.js'
 
 ///
-/// pass inbound performance requests onwards
+/// looks for performances that typically contain properties like
+///
+///		- audio
+///		- emotion
+///		- whisper timings
 ///
 
 export const puppet_client_side_performance_observer = {
@@ -20,31 +23,20 @@ export const puppet_client_side_performance_observer = {
 			return
 		}
 		for(const entity of entities) {
-			helper1(entity,args.blob.performance)
+			add_performance(entity,args.blob.performance)
 			break
 		}
 	}
 }
 
-const helper1 = (entity,perf) => {
-
-	if(!entity.puppet || !entity.volume || !entity.volume._node) {
-		console.error("puppet::perform target entity has no puppet or volume or is not ready",entity)
-		return
+const add_performance = (entity,perf) => {
+	if(!entity.puppet || !entity.volume || !entity.volume._node) return
+	if(!entity.puppet._handler) {
+		entity.puppet._handler = new Puppet(entity.volume._node)
+		// @todo will eventually want a disposal mechanism for these dynamically created objects as well
 	}
-
-	let handler = entity.puppet._handler
-	if(!handler) {
-		let div = entity.volume._node.parent.parentDiv
-		handler = entity.puppet._handler = new TalkingHeadArticulate(div)
-		handler.useAvatar(entity.volume._node)
-		handler.camera = entity.volume._node.parent.camera
-		console.log(entity.volume._node)
-	}
-
-	const blob = perf.whisper || {}
-	if(perf.audio) blob.audio = perf.audio
-	handler.speakAudio(blob)
+	console.log("puppet: got performance",perf)
+	entity.puppet._handler.perform(perf)
 }
 
 ///
@@ -58,38 +50,22 @@ export const puppet_client_side_tick_observer = {
 		if(!args.blob.tick) return
 		const entities = args.sys.query({puppet:true})
 		entities.forEach( (entity) => {
-			helper2(entity,args)
+			update_tick(entity,args)
 		})
 	}
 }
 
-const helper2 = (entity,args) => {
-
-	// do nothing if no art
-	if(!entity.volume._node) return
-
-	let handler = entity.puppet._handler
-	if(!handler) {
-		let div = entity.volume._node.parent.parentDiv
-		handler = entity.puppet._handler = new TalkingHeadArticulate(div)
-		handler.useAvatar(entity.volume._node)
-		handler.camera = entity.volume._node.parent.camera
-		console.log(entity.volume._node)
+const update_tick = (entity,args) => {
+	if(!entity.puppet || !entity.volume || !entity.volume._node) return
+	if(!entity.puppet._handler) {
+		entity.puppet._handler = new Puppet(entity.volume._node)
+		// @todo will eventually want a disposal mechanism for these dynamically created objects as well
 	}
+	entity.puppet._handler.update(args.blob.time,args.blob.delta)
 
-	// perform animation over time
-    let dt = handler.animateTime(args.blob.time)
-    if(dt) {
-		const o = handler.animateBuildList()
-		handler.animateSpeech(o)
-		handler.animateBody(o)
-    }
-
-	// clear busy flag if done
-	if(!handler.isSpeaking && entity.puppet.busy) {
-		entity.puppet.busy = false
-		sys.resolve({ uuid:entity.uuid, puppet:{ busy: false } })
+	// a helpful flag for callers to avoid overwhelming the puppet
+	if(!entity.puppet._handler.busy && entity.puppet.busy) {
+		sys.resolve({ uuid:entity.uuid, puppet:{ busy: 0 } })
 		console.log("puppet::perform clearing busy flag for",entity.uuid)
 	}
 }
-

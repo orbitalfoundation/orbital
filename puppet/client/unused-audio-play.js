@@ -1,9 +1,9 @@
 
 
-import { synthesize } from './tts-synth.js'
+import { synthesize } from './unused-tts-synth.js'
 
 ///
-/// @todo for some reason this approach is extraordinarily slow
+/// for some reason this approach is extraordinarily slow - so it is not used @todo delete
 ///
 
 export async function audio_preload(args,success,fail) {
@@ -23,6 +23,13 @@ export async function audio_preload(args,success,fail) {
 	}
 	fail()
 }
+
+///
+/// the browser built in voice has several serious problems - using this is not recommended @todo delete
+///		- no sense of duration
+///		- only one voice at a time (a real blocker)
+///		- lack of choice in voices
+///
 
 export async function audio_play(args,callback_on_done=null) {
 

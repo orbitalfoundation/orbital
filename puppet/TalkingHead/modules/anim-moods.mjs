@@ -22,7 +22,7 @@ export const animMoods = {
         ]
       },
       'happy' : {
-        baseline: { mouthSmile: 0.2, eyesLookDown: 0.1 },
+        baseline: { mouthSmile: 0.6, eyesLookDown: 0.1 },
         speech: { deltaRate: 0, deltaPitch: 0.1, deltaVolume: 0 },
         anims: [
           { name: 'breathing', delay: 1500, dt: [ 1200,500,1000 ], vs: { chestInhale: [0.5,0.5,0] } },

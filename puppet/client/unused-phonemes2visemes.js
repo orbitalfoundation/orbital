@@ -197,7 +197,6 @@ Object.entries(phonemeToVisemeMap_Reallusion).forEach( ([k,v])=>{
 
 ///
 /// Given phonemes over a timeline and a given point in that timeline, calculate the visemes for that point in time
-/// This approach differs from the above approach
 ///
 /// Accepts an array of phonemes where each phoneme is something like { phoneme:'a', offset: 123 }
 /// Returns an exact placement for visemes at that time as an array of 15 ordered viseme amplitudes

@@ -149,8 +149,8 @@ class VolumeManager {
 			this.controls.update()
 		}
 
-		camera.position.set(0, 1, 5)
-		if(this.controls) this.controls.target.set(0,1,0); else camera.lookAt.set(0,1,0)
+		camera.position.set(0, 1.6, 5)
+		if(this.controls) this.controls.target.set(0,1.6,0); else camera.lookAt.set(0,1.6,0)
 
 		// helpers
 		const gridHelper = new THREE.GridHelper( 10, 10 );
