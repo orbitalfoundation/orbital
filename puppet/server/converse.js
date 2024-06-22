@@ -1,15 +1,19 @@
 
-import { reason_openai } from './reason-openai.js'
+import { reason_llm } from './reason-llm.js'
 import { tts_openai } from './tts-openai.js'
 import { tts_coqui } from './tts-coqui.js'
 import { stt_whisper } from './stt-whisper.js'
 import { lipsyncQueue, lipsyncGetProcessor } from '../talkinghead/modules/lipsync-queue.mjs'
-import { mp3duration } from './mp3duration.js'
+//import { mp3duration } from './mp3duration.js'
 
 let conversationCounter = 10000
 
+const isServer = typeof window === 'undefined'
+
 ///
-/// Given a pile of utter perform reasoning, speech to text, time stamp generation and call a callback with many fragments
+/// Do reasoning, speech to text, time stamp generation and call a callback with many fragments
+///
+/// Done as a separate file to make it independent and modular so can be used in other projects
 ///
 /// Goals:
 ///
@@ -26,117 +30,126 @@ let conversationCounter = 10000
 /// Can return true if it is likely to succeed - this can help reduce which entities receive traffic
 ///
 
-export async function converse(utter,callback) {
+export async function converse_queue(scope,prompt) {
 
-	let text = `${utter.text}`
-
-	console.log("puppet::converse got prompt",text)
-
-	if(text.startsWith('/emote')) {
-		const emotion = text.slice(6).trim()
-		console.log("puppet::converse command detected - emotion=",emotion)
-		callback({text,emotion})
-		return
+	if(!scope.conversationCounter) {
+		scope.conversationCurrent = 10000
+		scope.conversationCounter = 10000
+		scope.conversationSegment = 0
+		scope.conversationSegments = 0
+	} else {
+		scope.conversationCounter++
 	}
 
-	//
-	// moderation and sanitization and sanity checks on user input
-	// @todo
-	//
+	console.log("puppet::converse got prompt",prompt)
 
-	//
-	// call a reasoning module if any; this could be a full blown llm or anything else
-	// there may be rag systems, decision trees, pre-parsing, memoization of previous responses etc...
-	// @todo at the moment an emotion can be returned in brackets - by preprompting - improve
-	// @todo also return gestures such as [wave] or [point at x] or [dance] that are appropriate
-	//
+	let emotion = null
+	let text = null
 
-	if(utter.reason) {
-		text = await reason_openai(utter.reason,text)
+	// developer support - test emotions
+	if(prompt.startsWith('/emote')) {
+		let tokens = prompt.split(' ')
+		tokens.shift()
+		emotion = tokens.shift()
+		if(emotion && emotion.length) {
+			text = tokens.join(' ') + `[${emotion}]`
+		} else {
+			text = "No emotion specified"
+			emotion = "sad"
+		}
+	}
+
+	// developer support skip reasoning and just say something on demand
+	else if(prompt.startsWith('/say')) {
+		text = prompt.slice(4).trim()
+	}
+
+	// reason
+	else if(scope.reason) {
+		text = await reason_llm(scope.reason,prompt)
 		if(!text) {
 			text = 	"Having trouble responding due to network error"
 		}
 		console.log("puppet::converse got response",text)
+	} else {
+		text = "This npc has no reasoning ability"
 	}
 
-	// test code - extract an emotion from the last brackets as in [happy]
-	// @todo remove this - later use emoji and ideally more emotions more often rather than just one
-
-	let emotion = null
-	{
+	// simple emotion support hack - later support more granular emotions and emoji @todo
+	if(!emotion) {
 		const mark1 = text.lastIndexOf('[')
 		const mark2 = text.lastIndexOf(']')
 		if(mark1 && mark1 < mark2) {
 			emotion = text.substring(mark1+1,mark2)
 			text = text.slice(0,mark1)
-			console.log("puppet::converse emotion from text",text,emotion)
 		}
+	}
+
+	if(!text || !text.length) {
+		console.error("npc has nothing to say")
+		return []
 	}
 
 	//
 	// build a queue of separate sentences from the input phrase
-	// @note this is kind of overkill; it's nice to clean up the sentences but visemes are not always needed
+	// @note this is kind of overkill; it's nice to clean up the sentences but visemes are not always needed yet
 	//
 
 	await lipsyncGetProcessor("en")
 	let queue = lipsyncQueue(text)
-
-	//
-	// pass each of the fragments through the tts and onwards to the playback as fast as possible
-	//
-
-	const conversation = conversationCounter++
-
-	for(let segment = 0;segment < queue.length;segment++) {
-		let blob = queue[segment]
-		blob.segment = segment
-		blob.segmentsTotal = queue.length
-		blob.conversation = conversation
-		blob.emotion = emotion
-		blob.prompt = utter.text
-		let sentence = !blob.text ? null : blob.text.map( term => { return term.word }).join(' ')
-		if(sentence && sentence.length) {
-			blob.text = blob.sentence = sentence
-			//console.log("puppet::converse segment",sentence)
-		} else {
-			delete blob.sentence
+	queue.forEach(item => {
+		if(item.text) {
+			if(emotion && emotion.length) item.emotion = emotion
+			item.prompt = prompt
 		}
+	})
+	scope.conversationSegments = queue.length
 
-		await converse_fragment(utter,blob)
-		callback(blob)
-	}
-
-	return true
+	// return queue
+	return queue
 }
 
-async function converse_fragment(utter,blob) {
+export async function converse_fragment(scope,blob) {
 
-	const sentence = blob.sentence
+	blob.conversation = scope.conversationCounter
+	blob.segment = scope.conversationSegment++
+	blob.segmentsTotal = scope.conversationSegments
 
-	let bufferArray = null
+	// clean up text a bit if any
+	let sentence = !blob.text ? null : blob.text.map( term => { return term.word }).join(' ')
+	if(sentence && sentence.length) {
+		blob.sentence = blob.text = sentence
+	} else {
+		delete blob.sentence
+	}
+
+
+	const text = blob.text && blob.text.length ? blob.text : null
+	let buffer = null
 
 	//
 	// tts using openai?
 	//
 
-	if(sentence && sentence.length && utter.tts && utter.tts.provider == "openai") {
-		blob.sentence = sentence
-		bufferArray = await tts_openai(utter.tts,sentence)
-		if(bufferArray) {
+	if(text && scope.tts && scope.tts.provider == "openai") {
+		buffer = await tts_openai(scope.tts,blob.text)
+		if(!buffer) {
+			console.error("npc: failed to talk to tts")
+			delete blob.audio
+			return
+		}
 
-			// would love to have duration early but sadly the blob isn't mp3 as openai claims but is in fact "ADTS" - which wraps mp3 for streaming
-			// blob.duration = mp3duration(bufferArray)
-
-			// tediously convert to binary
-			let binary = ''
-			bufferArray.forEach(elem => { binary+= String.fromCharCode(elem) })
-
-			// don't bother packaging this up as a playable file but rather let the client do that if it wishes
+		if(isServer) {
+			const binary = Buffer.from(buffer).toString('binary');
+			blob.audio = Buffer.from(binary, 'binary').toString('base64');
+		} else {
+			const uint8buf = new Uint8Array(buffer)
+			const arrayu8 = Array.from(uint8buf)
+			let binaryu8 = ''; arrayu8.forEach(elem => { binaryu8+= String.fromCharCode(elem) })
+			//const binaryu8 = String.fromCharCode.apply(null,arrayu8) // this is blowing the stack
+			// don't bother packaging this up as a playable file but rather let the client do that if desired
 			// blob.audio = "data:audio/mp3;base64," + window.btoa( binary )
-
-			// then convert to b64 encoded and stuff it into blob for external access
-			blob.audio = window.btoa( binary )
-
+			blob.audio = window.btoa(binaryu8)
 		}
 	}
 
@@ -144,11 +157,8 @@ async function converse_fragment(utter,blob) {
 	// tts using coqui? (this approach generates phoneme timestamps for visemes)
 	//
 
-	else if(sentence && sentence.length && utter.tts && utter.tts.provider == "coqui") {
-		blob.sentence = sentence
-		const results = await tts_coqui(utter.tts,sentence)
-
-		// stuff duration, audio and other facts into returned results
+	else if(text && scope.tts && scope.tts.provider == "coqui") {
+		const results = await tts_coqui(scope.tts,text)
 		Object.assign(blob,results)
 	}
 
@@ -156,9 +166,11 @@ async function converse_fragment(utter,blob) {
 	// stt using whisper? to get performance timing per word for visemes
 	//
 
-	if(utter.whisper && bufferArray) {
-		blob.whisper = await stt_whisper(utter.tts,bufferArray)
+	if(scope.whisper && buffer) {
+		blob.whisper = await stt_whisper(scope.whisper,buffer)
 	}
+
+	return blob
 }
 
 

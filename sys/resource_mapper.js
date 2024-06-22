@@ -27,7 +27,7 @@ export function resource_mapper(resource,add_importmaps) {
 	}
 
 	// for now don't support relative paths for simplicity
-	else if(resource.includes("..")) {
+	else if(resource.startsWith("..")) {
 		error("sys: resource loader: does not support relative paths at the moment... resource=",resource)
 		return null
 	}

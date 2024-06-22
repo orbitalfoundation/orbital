@@ -48,10 +48,6 @@ export class TalkingHeadArticulate extends TalkingHeadAudio {
     // Lip-sync extensions, import dynamically
     this.lipsync = {};
     this.opt.lipsyncModules.forEach( x => lipsyncGetProcessor(x) );
-    this.visemeNames = [
-      'aa', 'E', 'I', 'O', 'U', 'PP', 'SS', 'TH', 'DD', 'FF', 'kk',
-      'nn', 'RR', 'CH', 'sil'
-    ];
 
     // Speech queue
     this.speechQueue = [];
@@ -174,6 +170,8 @@ export class TalkingHeadArticulate extends TalkingHeadAudio {
       o.onSubtitles = onsubtitles;
     }
 
+    if(r.mood) o.mood = r.mood
+
     if ( Object.keys(o).length ) {
       this.speechQueue.push(o);
       this.speechQueue.push( { break: 300 } );
@@ -224,6 +222,12 @@ export class TalkingHeadArticulate extends TalkingHeadAudio {
     this.isSpeaking = true;
     if ( this.speechQueue.length ) {
       let line = this.speechQueue.shift();
+
+      if(line.mood) {
+        this.resetLips();
+        if ( line.mood ) this.setMood( line.mood );
+      }
+
       if ( line.emoji ) {
 
         // Look at the camera
@@ -245,8 +249,6 @@ export class TalkingHeadArticulate extends TalkingHeadAudio {
         // Make a playlist
         this.audioPlaylist.push({ anim: line.anim, audio: line.audio });
         this.onSubtitles = line.onSubtitles || null;
-        this.resetLips();
-        if ( line.mood ) this.setMood( line.mood );
         this.playAudio();
 
       } else if ( line.text ) {

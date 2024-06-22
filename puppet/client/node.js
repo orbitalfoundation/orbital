@@ -21,47 +21,24 @@ export function nodeAddVisemeHelpers(node) {
 
 	const parts = node.parts = []
 
-	const partnames = [
-
-		// ready player me parts by convention
-		'EyeLeft',
-		'EyeRight',
-		'Wolf3D_Head',
-		'Wolf3D_Teeth',
-
-		// realusion parts by convention
-		'CC_Base_Eye',
-		'CC_Base_Teeth',
-		'CC_Game_Body',
-		'CC_Game_Tongue',
-		'RL_BoneRoot',
-		'Hair',
-		'Pants'
-	]
-
-	//
-	// find child parts that have face visemes in them
-	// for rpm or reallusion
-	//
-
-	partnames.forEach(name => {
-		let part = node.getObjectByName(name)
-		if(!part) return
+	node.traverse((part) => {
 		if(!part.morphTargetDictionary) return
-		// @note if i call part.updateMorphTargets() then the dictionary gets damaged
 		if(part.morphTargetDictionary['viseme_sil'] !== undefined) {
 			parts.push(part)
+			console.log("npc puppet found rpm",part.name)
+			console.log(part.morphTargetDictionary)
 		} else if(part.morphTargetDictionary["EE"] !== undefined) {
 			node.realusion = part.realusion = true
 			parts.push(part)
-			// I could inject retargeting details here but some of the targets are not single items
-			// Object.entries(retargeting).forEach( ([k,v]) => {
-			//	 part.morphTargetDictionary[k] = part.morphTargetDictionary[v]
-			// })
-		} else {
-			// unknown flavor
+			console.log("npc puppet found realusion",part.name)
 		}
 	})
+
+	if(!parts.length) {
+		console.error("npc puppet no parts found",node)
+	} else {
+		console.log("npc parts are",parts.length,parts,node)
+	}
 
 	//
 	// a helper for enumerating all raw morph targets and their current values
@@ -98,7 +75,15 @@ export function nodeAddVisemeHelpers(node) {
 					return part.morphTargetInfluences[t]
 				}
 			} else {
-				const t = part.morphTargetDictionary[target]
+				let t = part.morphTargetDictionary[target]
+				if(t === undefined) {
+					console.log("npc cannot find am patching",target)
+					switch(target) {
+						case 'mouthSmile': t = part.morphTargetDictionary['mouthSmileLeft']; console.log("npc target patch",target,t,part.morphTargetInfluences[t]); break
+						case 'eyesLookDown': t = part.morphTargetDictionary['eyeLookDownLeft']; console.log("npc target patch",target,t,part.morphTargetInfluences[t]); break
+						default: break
+					}					
+				}
 				if(t === undefined) return undefined
 				return part.morphTargetInfluences[t]
 			}
@@ -132,9 +117,24 @@ export function nodeAddVisemeHelpers(node) {
 					}
 					return
 				} else {
-					target = part.morphTargetDictionary[target]
-					if(target === undefined) return
-					part.morphTargetInfluences[target] = degree
+					let t2 = part.morphTargetDictionary[target]
+					if(t2 === undefined) {
+
+						switch(target) {
+							case 'eyesLookDown':
+								node.setMorphTargets('eyeLookDownLeft',degree)
+								node.setMorphTargets('eyeLookDownRight',degree)
+								return
+							case 'mouthSmile':
+								node.setMorphTargets('mouthSmileLeft',degree)
+								node.setMorphTargets('mouthSmileRight',degree)
+								return
+						}
+
+						console.log("not found",target)
+						return
+					}
+					part.morphTargetInfluences[t2] = degree
 				}
 			})
 		})
@@ -177,7 +177,6 @@ export function nodeAddVisemeHelpers(node) {
 
 	}
 
-	return parts
 }
 
 //

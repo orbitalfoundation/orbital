@@ -11,8 +11,8 @@ export class Router {
 	handlers = []
 
 	broadcast_change() {
-		console.log('router: broadcasting changed url',window.location.href)
 		if(isServer) return
+		console.log('router: broadcasting changed url',window.location.href)
 		for(let handle of this.handlers) {
 			handle(window.location.href)
 		}

@@ -6,6 +6,8 @@ import { animMoods } from './anim-moods.mjs'
 import { animEmojis } from './anim-emojis.mjs'
 import { poseTemplates, poseDelta, posePropNames } from './pose-templates.mjs'
 
+import { retargetAnimationClip, bindAnimationClipFromMixamo, VRMHumanBoneList, RPMtoReallusion , MorphTargetsToReallusion, MorphTargetDictionaryMixamo } from './retarget.js'
+
 /**
 * @class Talking Head Animate
 * @author Mika Suominen
@@ -43,7 +45,7 @@ export class TalkingHeadAnimate {
     this.posePropNames = posePropNames
 
     // Use "side" as the first pose, weight on left leg
-    this.poseName = "side"; // First pose
+    this.poseName = "nothing"; // First pose
     this.poseWeightOnLeft = true; // Initial weight on left leg
     this.poseCurrentTemplate = null;
     this.poseBase = this.poseFactory( this.poseTemplates[this.poseName] );
@@ -129,71 +131,128 @@ export class TalkingHeadAnimate {
       ikBones.push(bone);
     });
     this.ikMesh.bind( new THREE.Skeleton( ikBones ) );
-
   }
 
   /**
   * Loader for 3D avatar model.
-  * @param {string} avatar Avatar object with 'url' property to GLTF/GLB file.
+  * @param {string} props an object an with url property to a GLTF/GLB file.
   * @param {progressfn} [onprogress=null] Callback for progress
   */
-  async loadAvatar(avatar, onprogress=null ) {
+  async loadAvatar(props, onprogress=null ) {
 
-    // Checkt the avatar parameter
-    if ( !avatar || !avatar.hasOwnProperty('url') ) {
-      throw new Error("Invalid parameter. The avatar must have at least 'url' specified.");
+    // Check the avatar parameter
+    if ( !props || !props.hasOwnProperty('url') ) {
+      throw new Error("Avatar: Invalid parameter. The avatar must have at least 'url' specified.");
     }
 
     // Loader
     const loader = new GLTFLoader();
-    let gltf = await loader.loadAsync( avatar.url, onprogress );
+    let gltf = await loader.loadAsync( props.url, onprogress );
 
     useAvatar(gltf.scene)
     return gltf.scene
   }
 
+  bodyParts = {}
+
+  getObjectByName(name) {
+    return this.bodyParts[name]
+  }
+
   useAvatar(avatar) {
 
-    // Check the gltf
-    const required = [ this.opt.modelRoot ];
-    this.posePropNames.forEach( x => required.push( x.split('.')[0] ) );
-    required.forEach( x => {
-      if ( !avatar.getObjectByName(x) ) {
-        throw new Error('Avatar object ' + x + ' not found');
-      }
-    });
-
-    this.avatar = avatar;
-
-    // Clear previous scene, if avatar was previously loaded
-    this.mixer = null;
-
-    // Avatar full-body
-    this.armature = avatar.getObjectByName( this.opt.modelRoot );
-    this.armature.scale.setScalar(1);
-
-    // Morph targets
-    // TODO: Check morph target names
-    this.morphs = [];
-    this.armature.traverse( x => {
-      if ( x.morphTargetInfluences && x.morphTargetInfluences.length &&
-        x.morphTargetDictionary ) {
-        this.morphs.push(x);
-      }
-    });
-    if ( this.morphs.length === 0 ) {
-      throw new Error('Blend shapes not found');
+    const isVRM = avatar.humanoid ? true : false
+    const isMixamo = !isVRM && avatar.getObjectByName('RightShoulder') ? true : false
+    const isReallusion = !isVRM && avatar.getObjectByName('CC_Base_R_Clavicle') ? true : false
+    if(!isMixamo && !isReallusion && !isVRM) {
+        throw new Error('Avatar: object is neither mixamo nor reallusion nor vrm');      
     }
 
+    //
+    // Support VRM by reading the VRM bones and writing into the bodyParts table with renamed parts
+    // If a bone is missing then just put in a fake bone for that spot
+    //
+
+    if(isVRM) {
+      this.vrm = avatar
+      this.armature = avatar.humanoid.normalizedHumanBonesRoot
+      this.bodyParts = { Armature: this.armature }
+      Object.entries(VRMHumanBoneList).forEach( ([k,v]) => {
+        let node = avatar.humanoid.getNormalizedBoneNode(k)
+        if(node === undefined || !node) {
+          console.warn("Avatar: part not found for vrm",k)
+          this.bodyParts[v] = {
+            position: new THREE.Vector3(),
+            quaternion: new THREE.Quaternion(),
+            scale: new THREE.Vector3(),
+            updateWorldMatrix: ()=>{},
+            getWorldPosition: ()=> { return new THREE.Vector3() }
+          }
+        } else {
+          this.bodyParts[v]=node
+        }
+      })
+    }
+
+    //
+    // Support Reallusion by just renaming the parts into the bodyParts table
+    //
+
+    if(isMixamo || isReallusion) {
+      Object.entries(RPMtoReallusion).forEach( ([k,v]) => {
+        const o = avatar.getObjectByName(isMixamo?k:v)
+        if(!o) {
+          console.error("Avatar: cannot find part",v)
+        } else {
+          if(!isMixamo) o.name = k
+          this.bodyParts[k] = o
+        }
+      })
+    }
+
+    //
+    // For Mixamo, Reallusion and VRM must assert that certain parts are present
+    //
+
+    const required = [ this.opt.modelRoot, 'LeftEye', 'RightEye' ];
+    this.posePropNames.forEach( x => required.push( x.split('.')[0] ) );
+    required.forEach( x => {
+      if (!this.getObjectByName(x)) {
+        throw new Error('Avatar: object ' + x + ' not found');
+      }
+    });
+
+    // valid avatar
+    this.avatar = avatar;
+
+    // Clear previous scene, if avatar was previously loaded (mixer is not built unless animations are requested)
+    this.mixer = null;
+
+    //
     // Objects for needed properties
+    // Note that VRM models have a different bone hierarchy quaternion rotation and look messed up if mixamo animations are played on them
+    // There is logic (see retarget) to rewrite VRM rigs as they are loaded into a Mixamo/Reallusion compatible format.
+    // VRM support however is incomplete for ik animations and built in poses @todo
+    //
+    // This routine does a few things
+    // It stuffs live handles onto real state into poseAvatar
+    // It makes sure that poseBase has every single possible state
+    // It makes sure that poseTarget is ready in some unclear way - like that it matches pose delta; which is a reference I guess
+
     this.poseAvatar = { props: {} };
     this.posePropNames.forEach( x => {
       const ids = x.split('.');
-      const o = this.armature.getObjectByName(ids[0]);
+
+      // get the actual object and memoize a handle on the property of quaternion, position, scale
+      const o = this.getObjectByName(ids[0]);
       this.poseAvatar.props[x] = o[ids[1]];
+
+      // set the actual bone based on the base pose which should have every possible effect
       if ( this.poseBase.props.hasOwnProperty(x) ) {
-        this.poseAvatar.props[x].copy( this.poseBase.props[x] );
-      } else {
+        let prop = this.poseBase.props[x]
+        this.poseAvatar.props[x].copy( prop );
+      }
+      else {
         this.poseBase.props[x] = this.poseAvatar.props[x].clone();
       }
 
@@ -210,17 +269,60 @@ export class TalkingHeadAnimate {
     // Reset IK bone positions
     this.ikMesh.traverse( x => {
       if (x.isBone) {
-        x.position.copy( this.armature.getObjectByName(x.name).position );
+        x.position.copy( this.getObjectByName(x.name).position );
       }
     });
 
+    // Avatar full-body
+    this.armature = this.getObjectByName('Armature');
+
+    // why do this?
+    // this.armature.scale.setScalar(1);
+
     // Estimate avatar height based on eye level
     const plEye = new THREE.Vector3();
-    this.armature.getObjectByName('LeftEye').getWorldPosition(plEye);
+    this.getObjectByName('LeftEye').getWorldPosition(plEye);
     this.avatarHeight = plEye.y + 0.2;
 
+
+    //
+    // Build a list of morph targets for face visemes and face bones
+    // Some of the bones have morph targets and a morph target dictionary - save those bones
+    // For reallusion we fake the bone - we make a fake bone that has the found morph targets
+    // For reallusion we have to reference or index the morphtargetinfluences in the same sequence order to write to them later
+    //
+
+    if(!isVRM) {
+      // Morph targets
+      // TODO: Check morph target names
+      this.morphs = [];
+      avatar.traverse( x => {
+        if ( x.morphTargetInfluences && x.morphTargetInfluences.length && x.morphTargetDictionary ) {
+        if( Object.keys(x.morphTargetDictionary).length < 2) return
+          if(isReallusion) {
+            const morphTargetDictionary = {}
+            Object.entries(MorphTargetsToReallusion).forEach( ([k,v]) => {
+              let v2 = x.morphTargetDictionary[v]
+              if(v2 === undefined) {
+                //console.error("talkinghead retargeting fail for ",k,v,v2)
+                return
+              }
+              morphTargetDictionary[k]=v2
+            })
+            x = { morphTargetDictionary, morphTargetInfluences: x.morphTargetInfluences }
+          }
+          this.morphs.push(x);
+        }
+      });
+
+      if ( this.morphs.length === 0) {
+        //console.error("blend shapes not found",avatar)
+        throw new Error('Blend shapes not found');
+      }
+    }
+
     // Set pose and start animation
-    this.setMood( this.avatar.avatarMood || this.moodName || this.opt.avatarMood );
+    this.setMood( avatar.avatarMood || this.moodName || this.opt.avatarMood );
   }
 
   /**
@@ -376,6 +478,8 @@ export class TalkingHeadAnimate {
   */
   setPoseFromTemplate(template) {
 
+    if(!template) return
+
     // Special cases
     const isIntermediate = this.poseTarget && this.poseTarget.template && ((this.poseTarget.template.standing && template.lying) || (this.poseTarget.template.lying && template.standing));
     const isSameTemplate = template === this.poseCurrentTemplate;
@@ -429,6 +533,18 @@ export class TalkingHeadAnimate {
     } else if ( mt === 'chestInhale' ) {
       return this.poseDelta.props['Spine1.scale'].x * 20;
     } else {
+      if(this.vrm) {
+        const mt2 = MorphTargetsToReallusion[mt]
+        if(mt2 === undefined) {
+          return 0
+        }
+        const value = this.vrm.expressionManager.getValue(mt2)
+        if(value === undefined) {
+          console.log('talkinghead vrm value is undefined for morph',mt,mt2)
+          return 0
+        } 
+        return value
+      }
       const ndx = this.morphs[0].morphTargetDictionary[mt];
       if ( ndx !== undefined ) {
         return this.morphs[0].morphTargetInfluences[ndx];
@@ -445,6 +561,7 @@ export class TalkingHeadAnimate {
   * @param {number} v Value
   */
   setValue(mt,v) {
+
     if ( mt === 'headRotateX' ) {
       this.poseDelta.props['Head.quaternion'].x = v;
       this.poseDelta.props['Spine1.quaternion'].x =v/2;
@@ -487,6 +604,17 @@ export class TalkingHeadAnimate {
       this.poseDelta.props['LeftArm.scale'] = dneg;
       this.poseDelta.props['RightArm.scale'] = dneg;
     } else {
+
+      if(this.vrm) {
+        const mt2 = MorphTargetsToReallusion[mt]
+        if(mt2 === undefined) {
+          //console.error("talking head vrm morph target missing",mt)
+        } else {
+          this.vrm.expressionManager.setValue(mt2,v)
+        }
+        return
+      }
+
       this.morphs.forEach( x => {
         const ndx = x.morphTargetDictionary[mt];
         if ( ndx !== undefined ) {
@@ -496,10 +624,22 @@ export class TalkingHeadAnimate {
     }
   }
 
+  visemeNames = [
+    'aa', 'E', 'I', 'O', 'U', 'PP', 'SS', 'TH', 'DD', 'FF', 'kk', 'nn', 'RR', 'CH', 'sil'
+  ];
+
   /**
   * Reset all the visemes only
   */
   resetLips() {
+
+    if(this.vrm) {
+      this.visemeNames.forEach( x => {
+          this.vrm.expressionManager.setValue(`viseme_${x}`,0)
+      })
+      return
+    }
+
     this.visemeNames.forEach( x => {
       this.morphs.forEach( y => {
         const ndx = y.morphTargetDictionary['viseme_'+x];
@@ -538,7 +678,7 @@ export class TalkingHeadAnimate {
     this.mood = this.animMoods[this.moodName];
 
     // Reset morph target baseline to 0
-    for( let mt of ["handFistLeft","handFistRight",...Object.keys(this.morphs[0].morphTargetDictionary)] ) {
+    for( let mt of ["handFistLeft","handFistRight",...Object.keys(MorphTargetDictionaryMixamo)] ) {
       this.setBaselineValue( mt, this.mood.baseline.hasOwnProperty(mt) ? this.mood.baseline[mt] : 0 );
     }
 
@@ -562,7 +702,7 @@ export class TalkingHeadAnimate {
       'headRotateX', 'headRotateY', 'headRotateZ',
       'eyesRotateX', 'eyesRotateY', 'chestInhale',
       'handFistLeft', 'handFistRight',
-      ...Object.keys(this.morphs[0].morphTargetDictionary)
+      ...Object.keys(MorphTargetDictionaryMixamo)
     ].sort();
   }
 
@@ -998,7 +1138,7 @@ export class TalkingHeadAnimate {
   /**
   * animate avatar
   */
-  animateBody(o) {
+  animateBody(o,dt) {
 
     // Update values
     for( let [mt,x] of Object.entries(o) ) {
@@ -1012,17 +1152,23 @@ export class TalkingHeadAnimate {
     }
     this.updatePoseDelta();
 
-    // Hip-feet balance
-    const box = new THREE.Box3();
-    box.setFromObject( this.armature );
-    const ltoePos = new THREE.Vector3();
-    const rtoePos = new THREE.Vector3();
-    this.armature.getObjectByName('LeftToeBase').getWorldPosition(ltoePos);
-    this.armature.getObjectByName('RightToeBase').getWorldPosition(rtoePos);
-    const hips = this.armature.getObjectByName('Hips');
-    hips.position.y -= box.min.y / 2;
-    hips.position.x -= (ltoePos.x+rtoePos.x)/4;
-    hips.position.z -= (ltoePos.z+rtoePos.z)/2;
+    if(true) {
+      // Hip-feet balance
+      const box = new THREE.Box3();
+      box.setFromObject( this.armature );
+      const ltoePos = new THREE.Vector3();
+      const rtoePos = new THREE.Vector3();
+      this.getObjectByName('LeftToeBase').getWorldPosition(ltoePos);
+      this.getObjectByName('RightToeBase').getWorldPosition(rtoePos);
+      const hips = this.getObjectByName('Hips');
+      hips.position.y -= box.min.y / 2;
+      hips.position.x -= (ltoePos.x+rtoePos.x)/4;
+      hips.position.z -= (ltoePos.z+rtoePos.z)/2;
+    }
+
+    if(this.vrm) {
+      this.vrm.update(dt/1000)
+    }
 
   }
 
@@ -1041,56 +1187,60 @@ export class TalkingHeadAnimate {
   * @param {number} y Y-coordinate relative to visual viewport
   * @param {number} t Time in milliseconds
   */
-  lookAt(x,y,t) {
 
-  	// camera may not exist
-  	if(!this.camera || !this.nodeAvatar) {
-      return
+//
+// it looks like it is trying to compute a head rotation relative to the body
+//
+// so - given a point in 3d space to look at
+// transform it relative to the head
+// basically multiply it by the head
+// this now makes it into a relative rotation for the head only
+// then look at it
+// then pull out the euler from that
+//
+// i could compute a real point for the head to look at
+// that would be the actual rotation
+// but stuff stored in the head appears to be relative
+// so i have to transform that back
+//
+
+  lookAt(x,y,t) {
+    if(!t) return
+    if(!this.camera) return
+
+    // get head position
+    const head = this.getObjectByName('Head')
+    if(!head) return
+    head.updateMatrixWorld(true)
+    const headpos = new THREE.Vector3().setFromMatrixPosition(head.matrixWorld)
+
+    // do a lookat from the head to the target - relative to its own body
+    const m1 = new THREE.Matrix4()
+    m1.lookAt(this.camera.position,headpos,THREE.Object3D.DEFAULT_UP)
+    const q1 = new THREE.Quaternion()
+    q1.setFromRotationMatrix(m1)
+    if(head.parent) {
+      const m2 = new THREE.Matrix4()
+      m2.extractRotation( head.parent.matrixWorld )
+      const q2 = new THREE.Quaternion()
+      q2.setFromRotationMatrix(m2)
+      q1.premultiply(q2.invert())
     }
 
-    // Eyes position
-    const rect = this.nodeAvatar.getBoundingClientRect();
-    const lEye = this.armature.getObjectByName('LeftEye');
-    const rEye = this.armature.getObjectByName('RightEye');
-    lEye.updateMatrixWorld(true);
-    rEye.updateMatrixWorld(true);
-    const plEye = new THREE.Vector3().setFromMatrixPosition(lEye.matrixWorld);
-    const prEye = new THREE.Vector3().setFromMatrixPosition(rEye.matrixWorld);
-    const pEyes = new THREE.Vector3().addVectors( plEye, prEye ).divideScalar( 2 );
-    pEyes.project(this.camera);
-    let eyesx = (pEyes.x + 1) / 2 * rect.width + rect.left;
-    let eyesy  = -(pEyes.y - 1) / 2 * rect.height + rect.top;
+    // get lookat as euler - exit if out of bounds
+    const e = new THREE.Euler()
+    e.setFromQuaternion(q1)
 
-    // if coordinate not specified, look at the camera
-    if ( x === null ) x = eyesx;
-    if ( y === null ) y = eyesy;
+    if(e.y > 1.3 || e.y < -1.3 || e.x > 0.3 || e.x < - 0.3 ) return
 
-    // Use body/camera rotation to determine the required head rotation
-    let q = this.poseTarget.props['Hips.quaternion'].clone();
-    q.multiply( this.poseTarget.props['Spine.quaternion'] );
-    q.multiply( this.poseTarget.props['Spine1.quaternion'] );
-    q.multiply( this.poseTarget.props['Spine2.quaternion'] );
-    q.multiply( this.poseTarget.props['Neck.quaternion'] );
-    q.multiply( this.poseTarget.props['Head.quaternion'] );
-    let e = new THREE.Euler().setFromQuaternion(q);
-    let rx = e.x / (40/24); // Refer to setValue(headRotateX)
-    let ry = e.y / (9/4); // Refer to setValue(headRotateY)
-    let camerarx = Math.min(0.4, Math.max(-0.4,this.camera.rotation.x));
-    let camerary = Math.min(0.4, Math.max(-0.4,this.camera.rotation.y));
+    // convert to talking heads range
+    const rotx = e.x / (40/24)
+    const roty = e.y / (9/4)
+    const drotx = (Math.random() - 0.5) / 20;
+    const droty = (Math.random() - 0.5) / 20;
 
-    // Calculate new delta
-    let maxx = Math.max( window.innerWidth - eyesx, eyesx );
-    let maxy = Math.max( window.innerHeight - eyesy, eyesy );
-    let rotx = this.convertRange(y,[eyesy-maxy,eyesy+maxy],[-0.3,0.6]) - rx + camerarx;
-    let roty = this.convertRange(x,[eyesx-maxx,eyesx+maxx],[-0.8,0.8]) - ry + camerary;
-    rotx = Math.min(0.6,Math.max(-0.3,rotx));
-    roty = Math.min(0.8,Math.max(-0.8,roty));
-
-    // Randomize head/eyes ratio
-    let drotx = (Math.random() - 0.5) / 4;
-    let droty = (Math.random() - 0.5) / 4;
-
-    if ( t ) {
+    // push as an animation
+    {
 
       // Remove old, if any
       let old = this.animQueue.findIndex( y => y.template.name === 'lookat' );
@@ -1114,6 +1264,92 @@ export class TalkingHeadAnimate {
       };
       this.animQueue.push( this.animFactory( templateLookAt ) );
     }
+
+  }
+
+
+  lookAt_orig(x,y,t) {
+
+    if(!t) return
+
+  	// camera may not exist
+  	if(!this.camera) {
+      return
+    }
+
+    // Eyes position
+    let eyesx,eyesy
+    {
+      const lEye = this.getObjectByName('LeftEye');
+      const rEye = this.getObjectByName('RightEye');
+      lEye.updateMatrixWorld(true);
+      rEye.updateMatrixWorld(true);
+      const plEye = new THREE.Vector3().setFromMatrixPosition(lEye.matrixWorld);
+      const prEye = new THREE.Vector3().setFromMatrixPosition(rEye.matrixWorld);
+      const pEyes = new THREE.Vector3().addVectors( plEye, prEye ).divideScalar( 2 );
+      pEyes.project(this.camera);
+
+      const rect = this.nodeAvatar ? this.nodeAvatar.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
+      eyesx = (pEyes.x + 1) / 2 * rect.width + rect.left;
+      eyesy  = -(pEyes.y - 1) / 2 * rect.height + rect.top;
+
+      // if coordinate not specified, look at the camera
+      // if ( x === null ) x = eyesx;
+      // if ( y === null ) y = eyesy;
+    }
+
+    // Use body/camera rotation to determine the required head rotation
+    let q = this.poseTarget.props['Hips.quaternion'].clone();
+    q.multiply( this.poseTarget.props['Spine.quaternion'] );
+    q.multiply( this.poseTarget.props['Spine1.quaternion'] );
+    q.multiply( this.poseTarget.props['Spine2.quaternion'] );
+    q.multiply( this.poseTarget.props['Neck.quaternion'] );
+    q.multiply( this.poseTarget.props['Head.quaternion'] );
+
+    let e = new THREE.Euler().setFromQuaternion(q);
+    let rx = e.x / (40/24); // Refer to setValue(headRotateX)
+    let ry = e.y / (9/4); // Refer to setValue(headRotateY)
+
+    let camerarx = Math.min(0.4, Math.max(-0.4,this.camera.rotation.x));
+    let camerary = Math.min(0.4, Math.max(-0.4,this.camera.rotation.y));
+
+    // Calculate new delta
+    let maxx = Math.max( window.innerWidth - eyesx, eyesx );
+    let maxy = Math.max( window.innerHeight - eyesy, eyesy );
+    let rotx = this.convertRange(y,[eyesy-maxy,eyesy+maxy],[-0.3,0.6]) - rx + camerarx;
+    let roty = this.convertRange(x,[eyesx-maxx,eyesx+maxx],[-0.8,0.8]) - ry + camerary;
+    rotx = Math.min(0.6,Math.max(-0.3,rotx));
+    roty = Math.min(0.8,Math.max(-0.8,roty));
+
+    // Randomize head/eyes ratio
+    let drotx = (Math.random() - 0.5) / 4;
+    let droty = (Math.random() - 0.5) / 4;
+
+    {
+
+      // Remove old, if any
+      let old = this.animQueue.findIndex( y => y.template.name === 'lookat' );
+      if ( old !== -1 ) {
+        this.animQueue.splice(old, 1);
+      }
+
+      // Add new anim
+      const templateLookAt = {
+        name: 'lookat',
+        dt: [750,t],
+        vs: {
+          headRotateX: [ rotx + drotx ],
+          headRotateY: [ roty + droty ],
+          eyesRotateX: [ - 3 * drotx + 0.1 ],
+          eyesRotateY: [ - 5 * droty ],
+          browInnerUp: [[0,0.7]],
+          mouthLeft: [[0,0.7]],
+          mouthRight: [[0,0.7]]
+        }
+      };
+      this.animQueue.push( this.animFactory( templateLookAt ) );
+    }
+
   }
 
 
@@ -1139,8 +1375,8 @@ export class TalkingHeadAnimate {
       const target = intersects[0].point;
       const LeftArmPos = new THREE.Vector3();
       const RightArmPos = new THREE.Vector3();
-      this.armature.getObjectByName('LeftArm').getWorldPosition(LeftArmPos);
-      this.armature.getObjectByName('RightArm').getWorldPosition(RightArmPos);
+      this.getObjectByName('LeftArm').getWorldPosition(LeftArmPos);
+      this.getObjectByName('RightArm').getWorldPosition(RightArmPos);
       const LeftD2 = LeftArmPos.distanceToSquared(target);
       const RightD2 = RightArmPos.distanceToSquared(target);
       if ( LeftD2 < RightD2 ) {
@@ -1254,11 +1490,78 @@ export class TalkingHeadAnimate {
   * @param {number} [ndx=0] Index of the clip
   * @param {number} [scale=0.01] Position scale factor
   */
-  async playAnimation(url, onprogress=null, dur=10, ndx=0, scale=0.01) {
-    if ( !this.armature ) return;
+  async playAnimation(url, onprogress=null, dur=1, ndx=0, scale=0.01) {
 
     let item = this.animClips.find( x => x.url === url+'-'+ndx );
-    if ( item ) {
+
+    // load animation?
+
+    if(!item) {
+
+      let root = null
+      let clip = null
+      if(url.endsWith(".fbx")) {
+        root = await new FBXLoader().loadAsync( url, onprogress )
+        clip = root.animations[ndx]
+      } else {
+        const response = await fetch(url)
+        let json = await response.json()
+        clip = THREE.AnimationClip.parse(json[ndx])
+      }
+
+      if(this.vrm) {
+        // we can retarget some animations as long as there is a reference rig provided
+        if(!root) {
+          console.error("play animation needs a reference rig to retarget for vrm")
+          return
+        }
+        clip = retargetAnimationClip(root,ndx)
+        clip = bindAnimationClipFromMixamo(clip,this.vrm,this.armature)
+      }
+
+      if (!clip || !clip.tracks || clip.tracks.length <= 0) {
+        // push an empty clip to avoid calling fetch twice
+        console.log("animation not found",url,ndx)
+        item = {
+          url: url+'-'+ndx,
+          clip: null,
+          pose: null
+        }
+      } else {
+        const props = {};
+        clip.tracks.forEach( t => {
+          t.name = t.name.replaceAll('mixamorig','');
+          const ids = t.name.split('.');
+          if ( ids[1] === 'position' ) {
+            for(let i=0; i<t.values.length; i++ ) {
+              t.values[i] = t.values[i] * scale;
+            }
+            props[t.name] = new THREE.Vector3(t.values[0],t.values[1],t.values[2]);
+          } else if ( ids[1] === 'quaternion' ) {
+            props[t.name] = new THREE.Quaternion(t.values[0],t.values[1],t.values[2],t.values[3]);
+          } else if ( ids[1] === 'rotation' ) {
+            props[ids[0]+".quaternion"] = new THREE.Quaternion().setFromEuler(new THREE.Euler(t.values[0],t.values[1],t.values[2],'XYZ')).normalize();
+          }
+        });
+        // Add to clips
+        const newPose = { props: props };
+        if ( props['Hips.position'] ) {
+          if ( props['Hips.position'].y < 0.5 ) {
+            newPose.lying = true;
+          } else {
+            newPose.standing = true;
+          }
+        }
+        item = {
+          url: url+'-'+ndx,
+          clip,
+          pose: newPose
+        }
+      }
+      this.animClips.push(item);
+    }
+
+    if ( item && item.pose ) {
 
       // Reset pose update
       let anim = this.animQueue.find( x => x.template.name === 'pose' );
@@ -1285,57 +1588,8 @@ export class TalkingHeadAnimate {
       action.clampWhenFinished = true;
       action.fadeIn(0.5).play();
 
-    } else {
-
-      // Load animation
-      const loader = new FBXLoader();
-
-      let fbx = await loader.loadAsync( url, onprogress );
-
-      if ( fbx && fbx.animations && fbx.animations[ndx] ) {
-        let anim = fbx.animations[ndx];
-
-        // Rename and scale Mixamo tracks, create a pose
-        const props = {};
-        anim.tracks.forEach( t => {
-          t.name = t.name.replaceAll('mixamorig','');
-          const ids = t.name.split('.');
-          if ( ids[1] === 'position' ) {
-            for(let i=0; i<t.values.length; i++ ) {
-              t.values[i] = t.values[i] * scale;
-            }
-            props[t.name] = new THREE.Vector3(t.values[0],t.values[1],t.values[2]);
-          } else if ( ids[1] === 'quaternion' ) {
-            props[t.name] = new THREE.Quaternion(t.values[0],t.values[1],t.values[2],t.values[3]);
-          } else if ( ids[1] === 'rotation' ) {
-            props[ids[0]+".quaternion"] = new THREE.Quaternion().setFromEuler(new THREE.Euler(t.values[0],t.values[1],t.values[2],'XYZ')).normalize();
-          }
-
-        });
-
-        // Add to clips
-        const newPose = { props: props };
-        if ( props['Hips.position'] ) {
-          if ( props['Hips.position'].y < 0.5 ) {
-            newPose.lying = true;
-          } else {
-            newPose.standing = true;
-          }
-        }
-        this.animClips.push({
-          url: url+'-'+ndx,
-          clip: anim,
-          pose: newPose
-        });
-
-        // Play
-        this.playAnimation(url, onprogress, dur, ndx, scale);
-
-      } else {
-        const msg = 'Animation ' + url + ' (ndx=' + ndx + ') not found';
-        console.error(msg);
-      }
     }
+
   }
 
   /**
@@ -1463,8 +1717,8 @@ export class TalkingHeadAnimate {
 
     // Reset IK setup positions and rotations
     const root = this.ikMesh.getObjectByName(ik.root);
-    root.position.setFromMatrixPosition( this.armature.getObjectByName(ik.root).matrixWorld );
-    root.quaternion.setFromRotationMatrix( this.armature.getObjectByName(ik.root).matrixWorld );
+    root.position.setFromMatrixPosition( this.getObjectByName(ik.root).matrixWorld );
+    root.quaternion.setFromRotationMatrix( this.getObjectByName(ik.root).matrixWorld );
     if ( target && relative ) {
       target.add( root.position );
     }

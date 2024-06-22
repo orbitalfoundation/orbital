@@ -63,5 +63,10 @@ export class Puppet {
 	update(time,delta) {
 		this.face.update(time,delta,this.busy)
 	}
+
+	async playAnimation(url, onprogress=null, dur=1, ndx=0, scale=0.01) {
+		console.error("not implemented")
+	}
+
 }
 

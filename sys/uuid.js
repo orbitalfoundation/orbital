@@ -7,8 +7,12 @@
 //	return 0
 //}
 
-// https://stackoverflow.com/questions/105034/how-do-i-create-a-guid-uuid
-function uuidv4() { // Public Domain/MIT
+///
+/// https://stackoverflow.com/questions/105034/how-do-i-create-a-guid-uuid
+/// Public Domain/MIT
+///
+
+const uuidv4 = () => {
 	var d = new Date().getTime();//Timestamp
 	var d2 = ((typeof performance !== 'undefined') && performance.now && (performance.now()*1000)) || 0;//Time in microseconds since page-load or 0 if unsupported
 	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -24,23 +28,39 @@ function uuidv4() { // Public Domain/MIT
 	});
 }
 
-export const client_create_uuid = () => {
+///
+/// generate a local uuid using local storage for persistence
+/// it's beneficial to at least have some kind of persistence so that preferences exist between refreshes of the browser page
+///
+
+export const uuid_client = () => {
+	if(typeof window === 'undefined') {
+		const err = "sys: client guid should not be run on server"
+		console.error(err)
+		throw err
+	}
 	const storage = window.localStorage
 	if(!storage) {
 		return "client-"+uuidv4()
+	} else {
+		let local = storage["orbital-local-uuid"]
+		if(!local) {
+			local = storage['orbital-local-uuid'] = uuidv4()
+		}
+		return local
 	}
-	let local = storage["orbital-local-uuid"]
-	if(!local) {
-		local = storage['orbital-local-uuid']=local=uuidv4()
-	}
-	return local
 }
 
-export const server_create_uuid = () => {
+///
+/// generate a server guid - here we try to use the mac address to be durable and unique
+/// @todo probaby best to not use an async import and also not to rely on npm install node_modules
+///
+
+export const uuid_server = () => {
 	return new Promise( (resolve,reject) => {
 		import('node-machine-id').then(modules=>{
-			let systemid = modules.default.machineIdSync({original:true})
-			resolve(systemid)
+			const id = "server-" + modules.default.machineIdSync({original:true})
+			resolve(id)
 		})
 		reject()
 	})

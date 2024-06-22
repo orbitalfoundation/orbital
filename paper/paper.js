@@ -1,74 +1,150 @@
 
+const isServer = typeof window === 'undefined'
+
 import { log,warn,error } from '../utils/log.js'
 
 import { Router} from './router.js'
 
 import { logo } from './logo.js'
 
+import * as marked from './marked.min.js'
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 //
-// create html representation of paper component
+// a server side document model abstraction
+// this is useful on the server side only for ssr generation
+// by doing this extra step if there is javascript that executes in the page construction the page is still valid
+// (alternatively the html ascii state could be produced directly onto paper nodes but we'd lose dynamic js effects)
 //
 
-function paper_promote_to_dom(paper,sys) {
+const nodes = []
 
-	let node = paper._dom
+function createElement(kind) {
+	let node = {
+		className: "",
+		nodeName:kind,
+		classList: {},
+		style: {},
+		children: [],
+		remove: function() {}, // @todo
+		replaceChildren: function(child) {
+			this.children = [child]
+		},
+		appendChild: function(child) {
+			for(const node of this.children) {
+				if(node.id && node.id == child.id) return
+			}
+			this.children.push(child)
+		}
+	}
+	nodes.push(node)
+	return node
+}
 
-	if(node) {
-		// @todo add dirty or change detector!
-		return node
+function getElementById(id) {
+	for(const node of nodes) {
+		if(node.id == id) return node
+	}
+	return 0
+}
+
+const _paper_document_serverside = {
+	createElement,
+	getElementById,
+	body: createElement("body")
+}
+
+const document = isServer ? _paper_document_serverside : window.document
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//
+// bind paper nodes to the dom; effectively have the dom 'react' to changes in paper nodes
+//
+
+function _paper_dom_rebind(sys,path,entity,paper,parent_paper=null) {
+
+
+	const invisible = paper.invisible = paper.match && paper.match !== path
+
+	if(invisible) {
+		if(paper._dom) {
+			paper._dom.remove()
+		}
+		return
+	} else {
+		if(paper._dom) {
+			if(parent_paper && parent_paper._dom) {
+				parent_paper._dom.appendChild(paper._dom)
+			} else {
+				document.body.appendChild(paper._dom)
+			}
+			return
+		}
 	}
 
-	const kind = paper.kind || 'div'
+	// get dom element if any
+	let node = paper._dom
 
-	// update dom node if changed
-	if(!node || node._flavor != kind) {
+	// for now don't revisit things more than once - later do change detection and be reactive
+	// @todo this needs to be removed if we want dynamic updates and reactivity
+	// @todo to remove this however some of the below work needs to be skipped on update if no change
+	if(node) {
+		return
+	}
+
+	// may scavenge from the live scene (on the client this helps rebind to static SSR that was sent early)
+	// @todo may want to use query() and wrap the uuid w brackets to circumvent query() limitations
+
+	if(!node) {
+		node = document.getElementById(paper.uuid)
+		if(node) {
+			node._kind = node.nodeName.toLowerCase()
+			node._paper = paper
+			paper._dom = node
+		}
+	}
+
+	// may build or rebuild the dom element
+	// for server side rendering a fake node is generated
+
+	const kind = paper.kind || 'div'
+	if(!node || node._kind != kind) {
 		if(node) node.remove()
 		if(!paper.link) {
 			node = paper._dom = document.createElement(kind)
 		} else {
-			node = paper._dom = document.createElement("a")
-			paper._dom.href = paper.link
 			if(!paper.content) paper.content = paper.link
+			node = paper._dom = document.createElement("a")
+			node.href = paper.link
 		}
-		node.id = paper.id || paper.uuid
-		paper._flavor = kind
+		node.id = paper.uuid
+		node._paper = paper
+		node._kind = kind
 	}
 
+	// effects
+	_paper_dom_effects(paper)
 
+	// for now the content gets placed inside this node ... later this could be collapsed
 	let content = paper.content ? paper.content.trim() : null
 
-	// hack for markdown support - can't seem to import it directly @todo improve later
+	// markdown is built in
 	if(paper.markdown && content) {
-/*
-		if(!window.marked) {
-			window.marked = true
-			const temp = document.createElement('script')
-			temp.setAttribute('type', 'text/javascript')
-			//const path = new URL(import.meta.url).pathname + "/../marked.min.js"
-			const path = "/@orbital/paper/marked.min.js"
-			temp.src= path
-			document.head.appendChild(temp)
-			temp.addEventListener("load", (event) => {
-				content = window.marked.parse(content)
-				node.innerHTML = content
-			})
-			temp.addEventListener("error",(error)=>{
-				error(error)
-			})
-		} else
-*/
-		{
-			content = window.marked.parse(content)
-			node.innerHTML = content
-		}
-	} else
+		content = globalThis.marked.parse(content)
+	}
 
-	// update content if changed
+// @todo xxx test change detector
+
+	// update content if changed - script cannot be set 
 	if(content && content != node.innerHTML) {
 		node.innerHTML = content
 	}
 
-	// button support - supply the parent paper component
+// @todo xxx test change detector
+
+	// button and input support
 	if(paper.onclick) {
 		node.onclick = (event) => { paper.onclick(event,paper,sys) }
 	}
@@ -77,69 +153,110 @@ function paper_promote_to_dom(paper,sys) {
 		node.onchange = (event) => { paper.onchange(event,paper,sys) }
 	}
 
+	if(paper.onreturn) {
+		node.onreturn = (event) => { paper.onreturn(event,paper,sys) }
+	}
+
+	if(paper.placeholder) {
+		node.placeholder = paper.placeholder
+	}
+
+// @todo xxx test change detector
+
 	//////////////////////////////////////////////////////////////////////////////////////////
-	// apply properties in general
+	// apply properties
 
 	// apply css if changed; handles strings or hashes, converts to camelcase
 	if(paper.css) {
 		if (typeof paper.css === 'string' || paper.css instanceof String) {
+			// @todo actually best to pick these apart for consistency
 			node.style.cssText = paper.css
 		} else if (typeof paper.css === 'object') {
 			for(const [k,v] of Object.entries(paper.css)) {
-				var camelCased = k.replace(/-([a-z])/g,(g) => { return g[1].toUpperCase() })
+				// @todo any point in supporting dash notation at all? note that the dom supports both camelCase and dash
+				// k.replace(/-([a-z])/g,(g) => { return g[1].toUpperCase() })
 				node.style[k] = v
 			}
 		}
 	}
 
+// @todo xxx test change detector
+
 	// apply classes to the node if changed; handles strings or arrays
 	if(paper.classes) {
-		let classes = paper.classes
+		let classes = paper.classes || []
 		if (typeof paper.classes === 'string' || paper.classes instanceof String) {
 			classes = paper.classes.split(' ')
 		}
 		if(Array.isArray(classes)) {
 			for(const c of classes) {
-				if(!node.classList.contains[c]) node.classList.add(c)
+				if(node.classList.contains && node.classList.add) {
+					if(!node.classList.contains[c]) node.classList.add(c)
+				} else {
+					if(!node.classList.includes[c]) node.classList.push(c)
+				}
 			}
 			node.className.split(' ').forEach(c => {
-				if(!classes.includes[c]) {
-//					node.classList.remove(c)
+				if(classes.includes(c)) return
+				if(node.classList.remove) {
+					node.classList.remove(c)
+				} else {
+					let index = node.classList.indexOf(c)
+					if(indexOf>=0) node.classList.splice(index,1)
 				}
 			})
 		}
 	}
 
+// @todo xxx test change detector
+
 	// set other props - deal with deletion at some point
 	if(paper.props) {
 		//if(!node._props) node._props = {}
 		for(let [k,v] of Object.entries(paper.props)) {
-			if(this[k] != v) {
-				this[k] = v
+			if(node[k] != v) {
+				node[k] = v
 				//this.setAttribute(k,v)
 			}
 		}
 	}
 
-	//////////////////////////////////////////////////////////////////////////////////////////
-	// testing a richer agent
-	// @todo examine more later
-	// - there are a variety of ways that we could do composite effects
-	// - we could have a hiearchy of dom nodes to produce an overall effect
-	// - we could rewrite the node as it passes through
-	// - we could have real dom custom elements - these have to then be passed to the remote end for rehydration...
-	//
 
-	if(paper.logo) {
-		logo(paper)
+// @todo should be hiding and showing to the SAME POINT as before not inserting at the end
+
+	// adjust attachment point if needed
+	if(parent_paper && parent_paper._dom) {
+		parent_paper._dom.appendChild(paper._dom)
+	} else {
+		document.body.appendChild(paper._dom)
 	}
 
-	//////////////////////////////////////////////////////////////////////////////////////////
-	// embeddable scripting support - first pass
-	// it would be very nice to support inline execution with just <script> tags client side ... doesn't seem possible easily yet
-	// @todo examine more later
+	// pass an event to the node if it has a handler; i'm still thinking about various approaches here - how do we want to deal with events / reactivity etc?
+
+	if(paper.onevent) {
+		paper.onevent({event:'show',paper,sys})
+	}
 
 	/*
+	// disabled support test - after attach
+	if(paper.disabled) {
+		node.disabled = true
+		document.getElementById(node.id).disabled = true
+	} else if(node.disabled) {
+		node.disabled = false
+	}
+	*/
+
+}
+
+//
+// unused experimental feature
+//
+/*
+function _paper_javascript(paper) {
+
+	const kind = paper.kind
+
 	function setInnerHTML(elm, html) {
 	  elm.innerHTML = html;
 	  
@@ -173,81 +290,69 @@ function paper_promote_to_dom(paper,sys) {
 			child.setAttribute('type', 'text/javascript')
 		}
 	}
-	*/
+}
+*/
 
+//
+// test code to explore an idea of supporting richer primitives
+//
+// @todo examine more later
+// - there are a variety of ways that we could do composite effects
+// - we could have a hiearchy of dom nodes to produce an overall effect
+// - we could rewrite the node as it passes through
+// - we could have real dom custom elements - these have to then be passed to the remote end for rehydration...
+//
 
-	return node
+function _paper_dom_effects(paper) {
+	if(paper.logo) {
+		logo(paper)
+	}
 }
 
-
 //
-// update
+// re-evaluate a given node and all children against a path - largely for visibility
 //
-// hide or show a node (effectively synchronize the state)
-//
-// if a paper node is marked as a 'page' then it cannot exist with others - later introduce a bitmask
-//
-// @todo these should do an ssr friendly supporting merge not brute force replace replace
-// @todo smarter more granular updates - this node may already be visible... so by append/replacing it i am doing extra meaningless work that may cause flickers
+// hide or show a node (effectively synchronize the state between our db model and the dom)
 //
 
-function update(entity,path,sys,parent=null) {
+function _paper_evaluate_entity_against_path(sys,path,entity,blob,parent=null) {
 
-	const paper = entity.paper
-
-	// set for convenience
-
-	if(entity.uuid) paper.uuid = entity.uuid
-	if(entity.id) paper.id = entity.id
-
-	// visible?
-
-	const visible = paper.regex == null || (path && path.match(paper.regex))
-
-	// hide?
-
-	if(!visible) {
-		if(paper._dom) {
-			paper._dom.remove()
-		}
+	if(!entity) {
+		console.error("paper: no entity?",path)
+		console.log(blob)
 		return
 	}
 
-	// build or update dom node if needed (this routine should do nothing if there were no changes)
+	const paper = entity.paper
+	paper.uuid = entity.uuid
+	paper.id = entity.id
 
-	paper._dom = paper_promote_to_dom(paper,sys)
+	// may attach to dom or mark as invisible
+	_paper_dom_rebind(sys,path,entity,paper,parent)
 
-	// adjust attachment point if needed
-
-	if(parent && parent._dom) {
-		parent._dom.appendChild(paper._dom)
-	} else {
-		if(paper.page) {
-			// @todo only replace other pages not everything
-			document.body.replaceChildren(paper._dom)
-		} else {
-			document.body.appendChild(paper._dom)
-		}
-	}
-
-	if(paper.children && paper.children.length) {
+	// build or rebuild children
+	// children of paper can skip the .paper attribute for now @todo may remove this feature
+	// @todo later allow children ids to be used rather than using a hardcoded counter
+	if(!paper.invisible && paper.children && paper.children.length) {
 		let counter = 0
 		for(const child of paper.children) {
-			const _scratch = { uuid:`${entity.uuid}/${counter++}`, paper:child }
-			_scratch.paper.uuid = _scratch.uuid
-			update(_scratch,null,sys,paper)
+			const p = child.paper ? child.paper : child
+			//p.parent = entity.uuid - don't set this - pass it by hand
+			const _scratch = { uuid:`${paper.uuid}/${++counter}`, paper:p }
+			_paper_evaluate_entity_against_path(sys,path,_scratch,null,paper)
 		}
 	}
-}
 
+}
 
 //
 // get the path the user requested - stripping an 'anchor' if any
 // never let path be null - just for my own sanity
 //
 
-function get_path(uri,anchor) {
-	let path = decodeURI((new URL(uri)).pathname)
+function _paper_get_path(url,anchor) {
+	if(!url && isServer) url = "http://orbital.foundation/"
+	let path = decodeURI((new URL(url)).pathname)
 	if(anchor && path.startsWith(anchor) ) {
 		path = path.substr(anchor.length)
 	}
@@ -281,21 +386,24 @@ function observer(args) {
 	}
 
 	//
-	// update all elements on browser navigation event
+	// once only - setup router that will update all elements on browser navigation event
 	//
 
-	if(!this.router) {
+	if(!isServer && !this.router) {
 		this.url = "/"
 		this.router = new Router((url)=>{
 			this.url = url
 			console.log("paper: router refreshing with url",url)
-			const path = get_path(this.url,anchor)
+			const path = _paper_get_path(this.url,anchor)
 			const candidates = sys.query({paper:true})
 			candidates.forEach(entity=>{
-				update(entity,path,sys)
+				_paper_evaluate_entity_against_path(sys,path,entity,null)
 			})
 		})
-		// force the url to be updated now
+
+		// force the url to be updated even before scene is complete - to force sync early state
+		// @todo arguably this could be deferred to the last item but i can't tell when that happens
+		// @todo maybe i could broadcast a load completion event that is caught here?
 		this.router.broadcast_change()
 
 		// no need to run the below since the above will force the update
@@ -303,11 +411,11 @@ function observer(args) {
 	}
 
 	//
-	// update a single element when it changes
+	// evaluate a single element when it changes
 	//
 
-	const path = get_path(this.url,anchor)
-	update(args.entity,path,sys)
+	const path = _paper_get_path(this.url,anchor)
+	_paper_evaluate_entity_against_path(sys,path,args.entity,args.blob)
 }
 
 ///

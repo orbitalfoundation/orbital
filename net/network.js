@@ -1,6 +1,7 @@
 
-// react to { network:'server' } events - also first brings up network if not running already
-// @todo arguably a queue should be used to prevent out of order events at startup? or are we ok for these given await?
+//
+// network helper / wrapper - must be used when starting networking
+//
 
 async function observer(args) {
 
@@ -9,17 +10,15 @@ async function observer(args) {
 		if(args.sys.server) {
 			const modules = await import("./server.mjs")
 			this.server = new modules.Server(args.sys)
-			this.server_network_react = this.server.server_network_react.bind(this.server)
+			this.reactor = this.server.server_network_react.bind(this.server)
 		} else {
 			const modules = await import("./client.mjs")
-			this.client_network_react = modules.client_network_react
+			this.reactor = modules.client_network_react
 		}
 	}
 
-	if(this.server_network_react) {
-		this.server_network_react(args)
-	} else if(this.client_network_react) {
-		this.client_network_react(args)
+	if(this.reactor) {
+		this.reactor(args)
 	}
 
 }

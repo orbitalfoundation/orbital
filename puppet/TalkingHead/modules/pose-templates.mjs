@@ -5,6 +5,66 @@ import * as THREE from 'three';
 // for most natural result.
 
 export const poseTemplates = {
+
+  'nothing': {
+    standing: true,
+    props:{
+      'Hips.position':{x:0, y:0.989, z:0.001},
+      'Hips.rotation':{x:0.047, y:0.007, z:-0.007},
+      'Spine.rotation':{x:-0.143, y:-0.007, z:0.005},
+      'Spine1.rotation':{x:-0.043, y:-0.014, z:0.012},
+      'Spine2.rotation':{x:0.072, y:-0.013, z:0.013},
+      'Neck.rotation':{x:0.048, y:-0.003, z:0.012},
+      'Head.rotation':{x:0.05, y:-0.02, z:-0.017},
+      'LeftShoulder.rotation':{x:1.62, y:-0.166, z:-1.605},
+      'LeftArm.rotation':{x:1.275, y:0.544, z:-0.092},
+      'LeftForeArm.rotation':{x:0, y:0, z:0.302},
+      'LeftHand.rotation':{x:-0.225, y:-0.154, z:0.11},
+      'LeftHandThumb1.rotation':{x:0.435, y:-0.044, z:0.457},
+      'LeftHandThumb2.rotation':{x:-0.028, y:0.002, z:-0.246},
+      'LeftHandThumb3.rotation':{x:-0.236, y:-0.025, z:0.113},
+      'LeftHandIndex1.rotation':{x:0.218, y:0.008, z:-0.081},
+      'LeftHandIndex2.rotation':{x:0.165, y:-0.001, z:-0.017},
+      'LeftHandIndex3.rotation':{x:0.165, y:-0.001, z:-0.017},
+      'LeftHandMiddle1.rotation':{x:0.235, y:-0.011, z:-0.065},
+      'LeftHandMiddle2.rotation':{x:0.182, y:-0.002, z:-0.019},
+      'LeftHandMiddle3.rotation':{x:0.182, y:-0.002, z:-0.019},
+      'LeftHandRing1.rotation':{x:0.316, y:-0.017, z:0.008},
+      'LeftHandRing2.rotation':{x:0.253, y:-0.003, z:-0.026},
+      'LeftHandRing3.rotation':{x:0.255, y:-0.003, z:-0.026},
+      'LeftHandPinky1.rotation':{x:0.336, y:-0.062, z:0.088},
+      'LeftHandPinky2.rotation':{x:0.276, y:-0.004, z:-0.028},
+      'LeftHandPinky3.rotation':{x:0.276, y:-0.004, z:-0.028},
+      'RightShoulder.rotation':{x:1.615, y:0.064, z:1.53},
+      'RightArm.rotation':{x:1.313, y:-0.424, z:0.131},
+      'RightForeArm.rotation':{x:0, y:0, z:-0.317},
+      'RightHand.rotation':{x:-0.158, y:-0.639, z:-0.196},
+      'RightHandThumb1.rotation':{x:0.44, y:0.048, z:-0.549},
+      'RightHandThumb2.rotation':{x:-0.056, y:-0.008, z:0.274},
+      'RightHandThumb3.rotation':{x:-0.258, y:0.031, z:-0.095},
+      'RightHandIndex1.rotation':{x:0.169, y:-0.011, z:0.105},
+      'RightHandIndex2.rotation':{x:0.134, y:0.001, z:0.011},
+      'RightHandIndex3.rotation':{x:0.134, y:0.001, z:0.011},
+      'RightHandMiddle1.rotation':{x:0.288, y:0.014, z:0.092},
+      'RightHandMiddle2.rotation':{x:0.248, y:0.003, z:0.02},
+      'RightHandMiddle3.rotation':{x:0.249, y:0.003, z:0.02},
+      'RightHandRing1.rotation':{x:0.369, y:0.019, z:0.006},
+      'RightHandRing2.rotation':{x:0.321, y:0.004, z:0.026},
+      'RightHandRing3.rotation':{x:0.323, y:0.004, z:0.026}, 
+      'RightHandPinky1.rotation':{x:0.468, y:0.085, z:-0.03},
+      'RightHandPinky2.rotation':{x:0.427, y:0.007, z:0.034},
+      'RightHandPinky3.rotation':{x:0.142, y:0.001, z:0.012},
+      'LeftUpLeg.rotation':{x:-0.077, y:-0.058, z:3.126}, 
+      'LeftLeg.rotation':{x:-0.252, y:0.001, z:-0.018}, 
+      'LeftFoot.rotation':{x:1.315, y:-0.064, z:0.315}, 
+      'LeftToeBase.rotation':{x:0.577, y:-0.07, z:-0.009},
+      'RightUpLeg.rotation':{x:-0.083, y:-0.032, z:3.124},
+      'RightLeg.rotation':{x:-0.272, y:-0.003, z:0.021}, 
+      'RightFoot.rotation':{x:1.342, y:0.076, z:-0.222}, 
+      'RightToeBase.rotation':{x:0.44, y:0.069, z:0.016}
+    }
+  },
+/*
   'side': {
     standing: true,
     props: {
@@ -18,7 +78,7 @@ export const poseTemplates = {
       'Hips.position':{x:0,y:1,z:0}, 'Hips.rotation':{x:-0.036,y:0.09,z:0.135}, 'Spine.rotation':{x:0.076,y:-0.035,z:0.01}, 'Spine1.rotation':{x:-0.096,y:0.013,z:-0.094}, 'Spine2.rotation':{x:-0.014,y:0.002,z:-0.097}, 'Neck.rotation':{x:0.034,y:-0.051,z:-0.075}, 'Head.rotation':{x:0.298,y:-0.1,z:0.154}, 'LeftShoulder.rotation':{x:1.694,y:0.011,z:-1.68}, 'LeftArm.rotation':{x:1.343,y:0.177,z:-0.153}, 'LeftForeArm.rotation':{x:-0.049,y:0.134,z:0.351}, 'LeftHand.rotation':{x:0.057,y:-0.189,z:-0.026}, 'LeftHandThumb1.rotation':{x:0.368,y:-0.066,z:0.438}, 'LeftHandThumb2.rotation':{x:-0.156,y:0.029,z:-0.369}, 'LeftHandThumb3.rotation':{x:0.034,y:-0.009,z:0.016}, 'LeftHandIndex1.rotation':{x:0.157,y:-0.002,z:-0.171}, 'LeftHandIndex2.rotation':{x:0.099,y:0,z:0}, 'LeftHandIndex3.rotation':{x:0.1,y:0,z:0}, 'LeftHandMiddle1.rotation':{x:0.222,y:-0.019,z:-0.16}, 'LeftHandMiddle2.rotation':{x:0.142,y:0,z:0}, 'LeftHandMiddle3.rotation':{x:0.141,y:0,z:0}, 'LeftHandRing1.rotation':{x:0.333,y:-0.039,z:-0.174}, 'LeftHandRing2.rotation':{x:0.214,y:0,z:0}, 'LeftHandRing3.rotation':{x:0.213,y:0,z:0}, 'LeftHandPinky1.rotation':{x:0.483,y:-0.069,z:-0.189}, 'LeftHandPinky2.rotation':{x:0.312,y:0,z:0}, 'LeftHandPinky3.rotation':{x:0.309,y:0,z:0}, 'RightShoulder.rotation':{x:1.597,y:0.012,z:1.816}, 'RightArm.rotation':{x:0.618,y:-1.274,z:-0.266}, 'RightForeArm.rotation':{x:-0.395,y:-0.097,z:-1.342}, 'RightHand.rotation':{x:-0.816,y:-0.057,z:-0.976}, 'RightHandThumb1.rotation':{x:0.42,y:0.23,z:-1.172}, 'RightHandThumb2.rotation':{x:-0.027,y:0.361,z:0.122}, 'RightHandThumb3.rotation':{x:0.076,y:0.125,z:-0.371}, 'RightHandIndex1.rotation':{x:-0.158,y:-0.045,z:0.033}, 'RightHandIndex2.rotation':{x:0.391,y:0.051,z:0.025}, 'RightHandIndex3.rotation':{x:0.317,y:0.058,z:0.07}, 'RightHandMiddle1.rotation':{x:0.486,y:0.066,z:0.014}, 'RightHandMiddle2.rotation':{x:0.718,y:0.055,z:0.07}, 'RightHandMiddle3.rotation':{x:0.453,y:0.019,z:0.013}, 'RightHandRing1.rotation':{x:0.591,y:0.241,z:0.11}, 'RightHandRing2.rotation':{x:1.014,y:0.023,z:0.097}, 'RightHandRing3.rotation':{x:0.708,y:0.008,z:0.066}, 'RightHandPinky1.rotation':{x:1.02,y:0.305,z:0.051}, 'RightHandPinky2.rotation':{x:1.187,y:-0.028,z:0.191}, 'RightHandPinky3.rotation':{x:0.872,y:-0.031,z:0.121}, 'LeftUpLeg.rotation':{x:-0.095,y:-0.058,z:-3.338}, 'LeftLeg.rotation':{x:-0.366,y:0.287,z:-0.021}, 'LeftFoot.rotation':{x:1.131,y:0.21,z:0.176}, 'LeftToeBase.rotation':{x:0.739,y:-0.068,z:-0.001}, 'RightUpLeg.rotation':{x:-0.502,y:0.362,z:3.153}, 'RightLeg.rotation':{x:-1.002,y:0.109,z:0.008}, 'RightFoot.rotation':{x:0.626,y:-0.097,z:-0.194}, 'RightToeBase.rotation':{x:1.33,y:0.288,z:-0.078}
     }
   },
-
+*/
   'turn':{
     standing: true,
     props: {
@@ -140,6 +200,8 @@ Object.values(poseTemplates).forEach( x => {
 Object.keys( poseDelta.props ).forEach( x => {
   names.add(x)
 });
+
+console.log(names)
 
 export const posePropNames = [...names];
 

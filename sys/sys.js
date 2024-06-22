@@ -1,6 +1,10 @@
 
 import { log,warn,error } from '../utils/log.js'
 
+import { uuid_client, uuid_server } from "./uuid.js"
+
+const isServer = (typeof window === 'undefined') ? true : false
+
 ///
 /// Sys
 ///
@@ -29,32 +33,67 @@ import { log,warn,error } from '../utils/log.js'
 
 export class Sys {
 
-	// config props - try not to use this too much - later i may force this down to individual modules @todo may deprecate
+	/// detect if client or server
+	server = isServer
+
+	/// config props - try not to use this too much - later i may force this down to individual modules @todo may deprecate
+	/// generally it's not a great practice to have a global config but it is so convenient
 	config = {}
 
-	// for now all volatile state is indexed here for now - later it will not be volatile - may also try use indexdb @todo improve later with real persistence
-	database = {}
+	/// caller can supply their import.meta - this is useful to help understand file path resolution
+	meta = null
 
-	systemid = 0
-	timePrevious = 0
+	/// caller can supply a url path base for cases where an install is not at the root of the domain
+	anchor = null
+
+	/// every instance of orbital, on client or server, should have a globally unique identifier
+	/// on a client this is also set to the users public key
+	selfid = 0
 
 	constructor(config={}) {
 
-		// detect if client or server
-		this.server = (typeof window === 'undefined') ? true : false,
+		// there are a couple of event handlers that just cannot be passed sys - so it is global; try to not depend on that too much
+		globalThis.sys = this
 
-		// we need a quasi-stable durable inter-session uuid that can be used as a prefix for locally created entities
-		// servers can set this in a configuration property
-		// clients may want to use a user public key possibly?
-		// clients for now just use a random key stuffed into localstorage
-		this.systemid = config && config.systemid ? config.systemid : "you really should set this"
+		// stash config
+		this.config = config = config || {}
 
-		// remember the config for other users
-		// @todo generally i don't want a ton of global config if possible but it's a convenient catch all for now
-		this.config = config || {}
+		// stash callers 'import.meta' if any
+		this.meta = config.meta ? config.meta : {}
 
-		// bind the tick and frame update logic to allow it to be passed as a callback
-		this.run = this.run.bind(this)
+		// stash 'anchor' if any
+		this.anchor = config.anchor ? config.anchor : null
+
+		//
+		// a pseudo importmap like pattern allows orbital itself to be mapped to different locations
+		//
+		// we need some way to let people specify where resources are in a fairly portable way that minimizes changes to their code
+		// the caller can specify importmaps to resolve namespaced paths; this is similar to the browser importmaps concept
+		// as a convention the path @orbital will be injected if the user does not supply their own import maps; this reduces client code setup burdens
+		// it is ok for this to be an empty string - the remapping logic will figure it out
+		//
+
+		let dirname = config.meta && config.meta.dirname && config.meta.dirname.length ? config.meta.dirname : ''
+		console.log(`sys: base folder is ${dirname}`)
+		if(isServer) {
+			this.importmaps = config.importmaps || {
+				'@orbital':`${dirname}`
+			}
+		} else {
+			this.importmaps = config.importmaps || {
+				'@orbital':`${dirname}/@orbital`
+			}			
+		}
+
+		// make strong efforts to get a durable selfid for locally created objects
+		if(config && config.selfid) {
+			this.selfid = config.selfid
+		} else if(!isServer) {
+			this.selfid = uuid_client()
+		} else {
+			throw "sys: supply a server selfid"
+			// this.selfid = await uuid_server() <- prefer not to use an await syntax @todo
+		}
 
 		//
 		// configure the initial event pipeline
@@ -62,7 +101,7 @@ export class Sys {
 	
 		const raw = new OnRaw()
 		const uuids = new OnUUID()
-		const dependencies = new OnDependencies(config.importmaps)
+		const dependencies = new OnDependencies(this.importmaps)
 		const outsiders = new OnOutsiders()
 
 		raw.subsequent.push(uuids.chain.bind(uuids))
@@ -74,6 +113,32 @@ export class Sys {
 			await raw.chain({blob,sys})
 		}
 
+		//
+		// bind the tick and frame update logic and start running if desired
+		//
+
+		this.run = this.run.bind(this)
+
+		const mayrun = () => {
+			if(config.hasOwnProperty('run') && config.run == false) {
+				// do not start running by default
+			} else {
+				this.run()
+			}
+		}
+
+		//
+		// as a convenience import any specified dependency file
+		//
+
+		if(config.dependencies) {
+			this.resolve({dependencies:config.dependencies}).then( ()=> {
+				mayrun()
+			})
+		} else {
+			mayrun()
+		}
+
 	}
 
 	async resolve(blob) {
@@ -81,43 +146,51 @@ export class Sys {
 		return this
 	}
 
-	async step() {
-		const sys = this
-		const time = performance.now()
-		const delta = this.timePrevious ? time - this.timePrevious : 0
-		this.timePrevious = time
-		const tick = {name:'tick',time,delta,tick:true}
-		await this.resolve(tick)
-		if(false) {
-			// we don't use this right now - it is for a two phase action/reaction approach - right now i react immediately instead
-			const blobs = this.raw.blobs
-			this.raw.blobs = []
-			blobs.unshift(tick)
-			for(const blob of blobs) {
-				let args = {blob,sys,time,delta}
-				for(const resolve of this.observers) {
-					await resolve(args)
-				}
-			}
-		}
-	}
+	/////////////////////////////////////////////////////////////////////////////////////////
+	// tick update - drives system forward on client and server
 
-	async sleep(millis) {
-	    return new Promise(resolve => setTimeout(resolve, millis));
-	}
+	timePrevious = 0
+	sanityCheck = 0
 
 	async run() {
-		if(!this.server) {
-			await this.step()
-			window.requestAnimationFrame(this.run)
+		if(this.sanityCheck) {
+			throw "sys: run invoked more than once!"
+		}
+		this.sanityCheck++
+
+		const framerate = 1000/60
+		const minimum = 4
+
+		const time = performance.now()
+		const delta = this.timePrevious ? time - this.timePrevious : framerate
+
+		// arguably tick may not need an id; and or the id could change; but this would pollute the database needlessly @todo
+		const tick = {name:'tick',time,delta,tick:true,uuid:`/orbital/sys/tick` }
+		await this.resolve(tick)
+
+		this.timePrevious = time
+		const elapsed = performance.now() - time
+
+		const sleep = elapsed < framerate && elapsed > minimum ? (framerate-elapsed) : minimum
+
+		const done = () => {
+			this.sanityCheck--
+			this.run()
+		}
+
+		if(!isServer && window.requestAnimationFrame) {
+			window.requestAnimationFrame(done)
 		} else {
-			while(true) {
-				await this.step()
-				// @todo should only sleep the gap not always 1000/60 - really needs to calculate the delay please
-				await this.sleep(16)
-			}
+			setTimeout(done,sleep)
 		}
 	}
+
+	/////////////////////////////////////////////////////////////////////////////////////////
+	// database - @todo move
+
+	/// for now all state is indexed here for now
+	/// @todo this will move to a separate module and may use indexdb also and or real persistence
+	database = {}
 
 	query_matches = (args,candidate) => {
 		for (const [key,val] of Object.entries(args)) {
@@ -304,25 +377,28 @@ class OnUUID {
 		const blob = args.blob
 		const time = Date.now() // args.time
 
-/*
-		// trialing a name granting capability
-		// i disabled this because it's too fragile - it is unclear when to use it @todo revisit anselm feb 2024
-		if(!blob.uuid && blob.name && blob.hasOwnProperty("_origin")) {
-			blob.uuid = sys.host + blob._origin + '/' + blob.name
-			blob.host = sys.host
-			blob.path = blob._origin
-			console.log("sys::uuid granted a uuid to a thing using origin",blob)
-		} else {
-			console.log("sys::uuid not granting a uuid because it may have one",blob)
-		}
-*/
+		// @todo do incoming datagrams always need a uuid?
+		//		 for example paper cannot query for or paint documents that do not have a uuid
+		// 		 there's some argument that uuid generation could be built in therefore
+		//		 however there are also cases where forcing a uuid is not the user intent
+		//		 for now this is disabled here
+		//		 in the loader i do grant a uuid for now
+		//
+		// if(!blob.uuid && blob.name && blob.hasOwnProperty("_origin")) {
+		//	blob.uuid = sys.host + blob._origin + '/' + blob.name
+		//	blob.host = sys.host
+		//	blob.path = blob._origin
+		//	console.log("sys::uuid granted a uuid to a thing using origin",blob)
+		// } else {
+		//	console.log("sys::uuid not granting a uuid because it may have one",blob)
+		// }
 
 		blob._now = performance.now() * 1000
 
 		// blob may specify to generate a uuid
 		// @todo could look at parent also later and generate one that is based on hierarchy
 		if(blob.hasOwnProperty('uuid') && !blob.uuid) {
-			blob.uuid = `${uuidcounter++}-${sys.systemid}`
+			blob.uuid = `${uuidcounter++}-${sys.selfid}`
 		}
 
 		// done this stage if no uuid; nothing to really do
@@ -331,6 +407,7 @@ class OnUUID {
 			blob._updated = time
 			args.fresh = blob._created ? false : true
 			if(args.fresh) blob._created = time
+			console.log("sys: uuid storage - blob has no uuid so is assumed to be transient and will not be saved",blob)
 			return
 		}
 
@@ -351,7 +428,13 @@ class OnUUID {
 			entity._updated = time
 			entity._now = performance.now() * 1000
 			deepAppend(blob,entity)
-		}		
+		}
+
+		// obliterate
+		if(entity.obliterate) {
+			console.log("sys: deleting",entity.uuid)
+			delete sys.database[uuid]
+		}
 	}
 }
 
@@ -425,8 +508,9 @@ class OnDependencies {
 	async _module_load({blob,sys}) {
 		const modules = blob.modules || blob.dependencies
 
+		/*
+		// @todo turned this off for now - i may want to remove this feature and force users to qualify their paths themselves
 		// a module is permitted to contain collections that are arrays that hold objects; mark those with the origin if any
-		// @todo i may want to remove this feature and force users to qualify their paths themselves
 		const recursively_set_origin = (item,resource) => {
 			if(!item) {
 				warn("sys::module loader: null object")
@@ -441,37 +525,64 @@ class OnDependencies {
 				error("module loader: unknown item type")
 			}
 		}
+		*/
 	
 		const helper = async (resource) => {
 
+			// resources can use import maps and or have paths that require special mapping to filesystem
 			const raw = resource_mapper(resource,this.importmaps)
-
 			if(!raw) {
 				error("module loader: cannot resolve path",resource)
 				return
 			}
 
 
-			// prevent duplicate loads
+			// prevent duplicate loads for now - later there is some argument to allow prefabs
 			if(this.loaded_modules[raw]) return
 			this.loaded_modules[raw] = true
 
-			// go ahead and pass module contents to sys
 			try {
-				//log("sys::module loading",raw,resource)
+
+				// bring in the raw module off disk
 				const module = await import(raw)
 				if(!module) {
 					error('sys: module not found ' + resource)
 					return
 				}
-				//log('sys::modules now parsing')
+
+				// modules typically will expose many objects that we want to treat as separate messages to sys
 				for(const [k,v] of Object.entries(module)) {
-					//log('sys::modules loaded and resolving this item',v,resource)
+
+					//
+					// uuid granting capability? @todo revisit
+					//
+					// uuids are somewhat desirable for subtle reasons; although not strictly necessary
+					// there's a distinction between a message containing a 'blob'; which is the raw datagram passed through the message pipeline
+					// and an 'entity' which is an object that a blob may have been applied to; and that represents the entire state of an entity
+					// typically we decorate messages with the full entity if we have it
+					// but entities only exist on things with uuids
+					// there is a design intention that users do not have to grant uuids to entities - but rather can ship transient datagrams
+					// at the same time there's some thought that we could grant uuids somewhere in the pipeline
+					// at this point in the pipeline we do happen to know the objects name - and _could_ grant a uuid
+					// another thought is that uuid management should occur entirely within the uuid observer
+					//
+					// if(typeof v === 'object' && !Array.isArray(v) && v !== null && !v.uuid) {
+					//	console.warn('sys: note blob had no uuid key=',k,'value=',v,'raw=',raw,'granting uuid',`/${k}`)
+					//	v.uuid = "/" + k
+					// }
+
+					//
+					// path markup?
+					//
+					// it may make sense to allow marking objects with a path for later asset discovery
+					// this is turned off for now
+					//
 					//recursively_set_origin(v,resource)
+
 					await sys.resolve(v)
 				}
 			} catch(err) {
-				error('sys: cannot finalize module due to some bug somewhere',path,err)
+				console.error('sys: cannot finalize module due to some bug somewhere',raw,path,err)
 			}
 		}
 

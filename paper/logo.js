@@ -1,4 +1,8 @@
 
+//
+// a fun stylized look generator for logos that defines some custom html content
+//
+
 export function logo(entity) {
 
 	let stylize = entity.stylize

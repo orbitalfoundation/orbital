@@ -1,3 +1,6 @@
+
+// this file cannot be loaded or run on the server at all...
+
 /*
 
 // it would be nice if javascript exposed importmaps programmatically; but it appears to not do so @todo
@@ -17,21 +20,27 @@ document.head.append(im)
 
 //import { MeshOptDecoder } from '@meshoptdecoder' 
 //<script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.20.0/meshopt_decoder.js"></script>
-const im = document.createElement('script')
-im.src = "@orbital/volume-3js/meshopt_decoder.js"
-document.head.append(im)
 
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+if(typeof document !== 'undefined') {
+	const im = document.createElement('script')
+	im.src = "@orbital/volume-3js/meshopt_decoder.js"
+	document.head.append(im)
+}
 
-import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
+import * as THREE from './libs/three/three.module.js';
+import { GLTFLoader } from './libs/three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from './libs/three/addons/loaders/KTX2Loader.js'
+import { DRACOLoader } from './libs/three/addons/loaders/DRACOLoader.js'
+import { FBXLoader } from './libs/three/addons/loaders/FBXLoader.js';
+import { OrbitControls } from './libs/three/addons/controls/OrbitControls.js'
+import { RoomEnvironment } from './libs/three/addons/environments/RoomEnvironment.js'
 
-/*
+import { VRMLoaderPlugin, VRMUtils, VRM, VRMHumanoid } from './three-vrm.module.js'
+
+// import { VRM, VRM1Meta, VRMHumanBone, VRMHumanoid } from '@pixiv/three-vrm'
+
+
+/* @todo try inject three into an import map
 import * as THREE from './libs/three/three.module.js'
 import { GLTFLoader } from './libs/three/jsm/loaders/GLTFLoader.js'
 import { KTX2Loader } from './libs/three/jsm/loaders/KTX2Loader.js'
@@ -39,7 +48,6 @@ import { DRACOLoader } from './libs/three/jsm/loaders/DRACOLoader.js'
 import { OrbitControls } from './libs/three/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from './libs/three/jsm/environments/RoomEnvironment.js'
 
-import { VRMLoaderPlugin, VRMUtils } from './three-vrm.module.js'
 */
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -102,7 +110,8 @@ class VolumeManager {
 			//preserveDrawingBuffer: true,
 			alpha: true
 		})
-		//renderer.autoClearColor = false
+		renderer.autoClearColor = false
+		renderer.setClearColor(0xffffff, 0);
 
 		renderer.setSize(parentDiv.clientWidth, parentDiv.clientHeight)
 		renderer.setPixelRatio(window.devicePixelRatio)
@@ -120,7 +129,7 @@ class VolumeManager {
 		// create a default scene with a default camera and controls
 
 		const scene = this.scene = new THREE.Scene();
-		scene.background = new THREE.Color(0x3355aa);
+		scene.background = new THREE.Color(0xffffff);
 
 		if(true) {
 			const pmremGenerator = new THREE.PMREMGenerator( this.renderer )
@@ -137,8 +146,8 @@ class VolumeManager {
 		scene.camera = camera
 		scene.parentDiv = parentDiv
 
-		if(true) {
-			this.controls = new OrbitControls( this.camera, this.renderer.domElement )
+		if(true && camera) {
+			this.controls = new OrbitControls( camera, this.renderer.domElement )
 			this.controls.enableZoom = this.opt.cameraZoomEnable
 			this.controls.enableRotate = this.opt.cameraRotateEnable
 			this.controls.enablePan = this.opt.cameraPanEnable
@@ -146,18 +155,16 @@ class VolumeManager {
 			this.controls.maxDistance = far
 			this.controls.autoRotateSpeed = 0
 			this.controls.autoRotate = false
-			this.controls.update()
 		}
 
-		camera.position.set(0, 1.6, 5)
-		if(this.controls) this.controls.target.set(0,1.6,0); else camera.lookAt.set(0,1.6,0)
+		this._cameraRetarget()
 
 		// helpers
-		const gridHelper = new THREE.GridHelper( 10, 10 );
-		scene.add( gridHelper );
+		//const gridHelper = new THREE.GridHelper( 10, 10 );
+		//scene.add( gridHelper );
 
-		const axesHelper = new THREE.AxesHelper( 5 );
-		scene.add( axesHelper );
+		//const axesHelper = new THREE.AxesHelper( 5 );
+		//scene.add( axesHelper );
 
 
 		///////////////////////////////////////////////////////////////////////
@@ -184,10 +191,17 @@ class VolumeManager {
 	update(time=0,delta=0) {
 
 		Object.values(this.entities).forEach(entity=> {
-			this._update_animation(entity.volume,time,delta)
+			// later do all prop updates not just animation @todo
+			this._change_animation(entity.volume,time,delta)
+
+			if(entity.volume._mixer) {
+	            entity.volume._mixer.update(delta/1000);
+	        }
+
 		})
 
-		if ( this.controls && this.controls.autoRotate ) {
+		if (this.controls) {
+			this._cameraHide()
 			this.controls.update()
 		}
 
@@ -202,6 +216,53 @@ class VolumeManager {
 		this.renderer.render( this.scene, this.camera )
 	}
 
+	_cameraRetarget(node=null) {
+
+		const camera = this.camera
+
+		if(!node) {
+			camera.distance = 5
+			camera.height = 1.5
+			camera.targetHeight = 1.5
+			camera.target = new THREE.Vector3(0,camera.targetHeight,0)
+			camera.position.set(camera.target.x,camera.target.y,camera.target.z+camera.distance)
+			let delta = camera.targetHeight - camera.height
+			camera.lookAt(camera.target.x,camera.target.y-delta,camera.target.z)
+			return
+		}
+
+		// get distance prior to the object moving and after any control or other effects
+		let distance = camera.position.distanceTo( camera.target )
+
+		// update target
+		camera.target.x = node.position.x
+		camera.target.y = node.position.y + camera.targetHeight
+		camera.target.z = node.position.z
+
+		// put camera behind target
+		const v = new THREE.Vector3(0,0,-distance).applyQuaternion(node.quaternion)
+		const p = node.position.clone().add(v)
+		camera.position.set(p.x,p.y+camera.height,p.z)
+
+		// update lookat
+		camera.lookAt(camera.target.x,camera.target.y,camera.target.z)
+
+		// adjust control lookat
+		if(this.controls) {
+			this.controls.target.set(camera.target.x,camera.target.y,camera.target.z)
+		}
+
+		node.visible = true
+		this.latchNode = node
+	}
+
+	_cameraHide() {
+		if(!this.latchNode) return
+		const camera = this.camera
+		let distance = camera.position.distanceTo( camera.target )
+		this.latchNode.visible = distance < 2 ? false : true
+	}
+
 	_resize() {
 		this.camera.aspect = this.parentDiv.clientWidth / this.parentDiv.clientHeight
 		this.camera.updateProjectionMatrix()
@@ -210,7 +271,7 @@ class VolumeManager {
 		this.renderer.render( this.scene, this.camera )
 	}
 
-	_update_animation(volume,time,delta) {
+	_change_animation(volume,time,delta) {
 
 		// sanity check
 		if(!volume.animations || !volume._node || !volume._clips || !volume._mixer) return
@@ -239,8 +300,6 @@ class VolumeManager {
 		    }
 		}
 
-		// animate the animations
-		volume._mixer.update(delta/1000)
 	}
 
 	async _update_miscellaneous(volume) {
@@ -251,13 +310,16 @@ class VolumeManager {
 		// @todo this runs once only for now improve later
 		// @todo detect dynamic changes to this string later and delete previous; this is just a quick hack to get some art assets loaded up for now
 
-		if(volume.geometry && !volume._node &&
+		if(volume.geometry && !volume._node && !volume._node_tried_load &&
 			(volume.geometry.endsWith(".glb") || volume.geometry.endsWith(".gltf") || volume.geometry.endsWith(".vrm") )
 		)
 		{
 			let currentVrm = null;
 
+			volume._node_tried_load = true
+
 			let gltf = await loader.loadAsync( "/" + volume.geometry )
+
 			if(!gltf || !gltf.scene) {
 				console.error("volume: cannot load",volume.geometry)
 			} else {
@@ -272,19 +334,46 @@ class VolumeManager {
 				// stuff the node into the volume and track it
 				volume._node = gltf.scene
 
+				// also track camera
+				volume._camera = this.camera
+
 				// deal with vrm or normal
 				if(gltf.userData && gltf.userData.vrm) {
-					const vrm = volume._vrm = gltf.userData.vrm
+
+					// vrm models are rotated? correct this
+					let vrm = gltf.userData.vrm
+
+					// this is needed for vrm 0.0 rigs only - disabled for now
+					if(true) {
+						const bones = vrm.humanoid.rawHumanBones
+						vrm.humanoid.normalizedHumanBonesRoot.removeFromParent()
+						bones.hips.node.rotateY(Math.PI)
+						vrm.humanoid = new VRMHumanoid(bones)
+						vrm.update(100)
+					}
+
+					volume._vrm = gltf.scene._vrm = gltf._vrm = gltf.userData.vrm = vrm
+
 					//console.log("volume-3js: loaded vrm",vrm)
 					// calling these functions greatly improves the performance (but collides with optimizers)
 					//VRMUtils.removeUnnecessaryVertices( gltf.scene );
 					//VRMUtils.removeUnnecessaryJoints( gltf.scene );
+
+
 					vrm.scene.traverse( ( obj ) => { obj.frustumCulled = false })
 					this.scene.add(vrm.scene)
 				} else {
 					//console.log("volume-3js: loaded normal glb")
 					this.scene.add(gltf.scene)
 				}
+
+				// animate
+				volume.loop = 1
+				if(volume.loop && gltf.animations[0]) {
+		            volume._mixer = new THREE.AnimationMixer(gltf.scene);
+		            volume._action = volume._mixer.clipAction(gltf.animations[0]);
+		            volume._action.play();
+		        }
 			}
 		}
 
@@ -314,6 +403,7 @@ class VolumeManager {
 				}
 			}
 
+			// @todo replace with something more neutral less targeted to wolf3d
 			let part = volume._node.getObjectByName('Wolf3D_Body') || volume._node.getObjectByName('Wolf3D_Avatar') || volume._node.getObjectByName('CC_Game_Body')
 			if(!part) {
 				console.error("volume-3js: missing body parts for animations",volume)
@@ -323,6 +413,7 @@ class VolumeManager {
 		}
 
 		//////////////////////////////////////////////////////////////////////////////////////
+
 
 		this._update_pose(volume)
 
@@ -372,7 +463,7 @@ class VolumeManager {
 
 		// set position
 		// @todo only if changed
-		// @todo consolidate handes on _vrm and _gltf - test if i can use node for vrm? 
+		// @todo consolidate _vrm and _gltf - test if i can use node for vrm? 
 		// @todo allow multiple cameras
 		// @todo consolidate the concepts here - rather than special treatment
 		// @todo allow anything to lookat anything
@@ -388,24 +479,21 @@ class VolumeManager {
 		}
 		else if(transform.xyz) {
 			if(volume._vrm) {
-				const x = volume.transform.xyz[0]
-				const y = volume.transform.xyz[1]
-				const z = volume.transform.xyz[2]
+				const x = transform.xyz[0]
+				const y = transform.xyz[1]
+				const z = transform.xyz[2]
 				volume._vrm.scene.position.set(x,y,z)
 			}
 			else if(volume._node) {
-				const x = volume.transform.xyz[0]
-				const y = volume.transform.xyz[1]
-				const z = volume.transform.xyz[2]
+				const x = transform.xyz[0]
+				const y = transform.xyz[1]
+				const z = transform.xyz[2]
 				volume._node.position.set(x,y,z)
 			}
-		}		
+		}
 
 		if(volume.camera_follow) {
-			const v = new THREE.Vector3(0,2,-5).applyQuaternion(node.quaternion)
-			const p = node.position.clone().add(v)
-			this.camera.position.set(p.x,p.y,p.z)
-			this.camera.lookAt(node.position.x,node.position.y+1,node.position.z)
+			this._cameraRetarget(volume._node)
 		}
 
 	}
@@ -424,6 +512,16 @@ class VolumeManager {
 			this.uuid++
 			entity.uuid = parent ? `${parent.uuid}/${this.uuid}` : `${uuid}`
 			console.warn("volume-3js: force granted uuid",entity.uuid)
+		}
+
+		if(entity.obliterate) {
+			console.log("volume-3js: being asked to destroy entity",entity)
+			if(entity.volume && entity.volume._node) {
+				entity.volume._node.removeFromParent()
+				entity.volume._node = null
+			}
+			delete this.entities[entity.uuid]
+			return
 		}
 
 		// store the entity
@@ -459,7 +557,7 @@ function _volume_manager_bind(entity) {
 
 	// use first volume if none specified
 	if(!key) {
-		//console.log("volume - key not found so binding to default",entity)
+		console.log("volume - key not found so binding to default",entity)
 		const values = Object.values(volume_managers)
 		return values.length ? values[0] : null
 	}

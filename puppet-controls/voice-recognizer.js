@@ -4,9 +4,9 @@ const isServer = typeof window === 'undefined'
 
 function helper(sys,text) {
 
-	console.log("saying",text)
+	console.log("voice recognizer caught text = ",text)
 
-	const speakers = sys.query({uuid:sys.systemid})
+	const speakers = sys.query({uuid:sys.selfid})
 
 	if(!speakers || !speakers.length || !speakers[0].volume || !speakers[0].volume.transform || !speakers[0].volume.transform.xyz) {
 		console.error("voice chat: bad speaker?",speakers)

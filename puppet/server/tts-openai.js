@@ -16,11 +16,11 @@ export async function tts_openai(tts,text) {
 		})
 		if(!response.ok) {
 			console.error("puppet:tts error",response)
-		} else {
-			const buffer = await response.arrayBuffer()
-			const bufferArray = new Uint8Array(buffer)
-			return bufferArray
+			return null
 		}
+
+		return await response.arrayBuffer()
+
 	} catch(err) {
 	  console.error('Error:', err)
 	}

@@ -17,7 +17,6 @@
 //
 
 import { Sys } from './sys/sys.js'
-import { client_create_uuid } from './sys/uuid.js'
 
 const segments = new URL(import.meta.url).pathname.split("/")
 segments.pop()
@@ -25,7 +24,6 @@ const current_path = segments.join('/')
 console.log("orbital client bootstrapping:  orbital kernel appears to be located at",current_path)
 
 const config = {
-	systemid: client_create_uuid(),
 	importmaps: {
 		'@orbital':current_path,
 	}

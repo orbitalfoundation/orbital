@@ -1,13 +1,9 @@
 
 import { Sys } from './sys/sys.js'
-//import { server_create_uuid } from './sys/uuid.js'
 
 const config = {
-	systemid: "orbital.foundation", //server_create_uuid(),
-	importmaps: {
-		'@orbital':import.meta.dirname,
-	},
-	network_port: 4000,
+	selfid: "orbital.foundation",
+	meta:import.meta,
 }
 
 const sys = new Sys(config)

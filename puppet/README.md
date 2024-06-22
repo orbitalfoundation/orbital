@@ -96,7 +96,7 @@ Both pipelines overlap to some degree - this is the overall arc of how work is p
 	The output is a new list of viseme timings that looks like this:
 
 		template: name 'viseme',
-		ts: [ start, end, duration ] in absolute time units (milliseconds)
+		ts: [ start, end, end? ] in absolute time units (milliseconds)
 		vs: [ viseme name, level or intensity, 0 ]
 
 	Now the playback engine stuffs these into an anim queue for playback.

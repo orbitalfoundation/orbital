@@ -115,7 +115,7 @@ export async function stt_whisper(props,bufferArray) {
 			whisperAudio.wdurations.push( 1000 * (x.end - x.start) );
 		})
 
-		// @todo signaling animations need to be not functions - just don't do these here ideally
+		// @todo from talking heads - signaling animations need to be not functions - just don't do these here ideally
 		/*
 		// Add timed callback markers to the audio object
 		const startSegment = async () => {

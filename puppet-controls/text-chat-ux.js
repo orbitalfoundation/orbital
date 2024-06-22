@@ -45,7 +45,7 @@ function onchange(event,parent,sys) {
 	const value = event.target.value
 	event.target.value = ''
 
-	const speakers = sys.query({uuid:sys.systemid})
+	const speakers = sys.query({uuid:sys.selfid})
 
 	if(!speakers || !speakers.length || !speakers[0].volume || !speakers[0].volume.transform || !speakers[0].volume.transform.xyz) {
 		console.error("text chat: bad speaker?",speakers)
@@ -57,7 +57,8 @@ function onchange(event,parent,sys) {
 		conversation:{
 			sponsor:speakers[0].uuid,
 			xyz:speakers[0].volume.transform.xyz,
-			text:value
+			text:value,
+			network:true
 		}
 	})
 }
@@ -65,7 +66,7 @@ function onchange(event,parent,sys) {
 export const puppet_text_chat_ux = {
 	uuid: text_chat_uuid,
 	paper: {
-		css: 'position:absolute;bottom:8px;left:2%;width:95%;font-size:2em',
+		css: 'position:absolute;bottom:40px;right:10px;width:300px;font-size:2em;border:3px solid red;z-index:111000',
 		children: [
 			{
 				css: 'display:none;width:100%;padding-left:4px;height:190px;background:rgba(200, 54, 54, 0.5)',
@@ -85,7 +86,7 @@ export const puppet_text_chat_ux = {
 					const b = args.target.parentNode.children[1].style
 					const state = a.display == 'block'
 					a.display = b.display = state ? 'none' : 'block'
-					sys.resolve({voice_recognizer:!state})
+					globalThis.sys.resolve({voice_recognizer:!state})
 				}
 			}
 		]

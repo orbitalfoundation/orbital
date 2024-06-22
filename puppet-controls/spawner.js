@@ -23,7 +23,7 @@ export const player_spawner_observer = {
 			return false
 		}
 
-		if(!args.sys || !args.sys.systemid) {
+		if(!args.sys || !args.sys.selfid) {
 			console.error("player spawner: no locally unique id")
 			return false
 		}
@@ -32,13 +32,15 @@ export const player_spawner_observer = {
 		// use the sys uuid
 		// - may want to have different spawn points to reduce player collisions?
 		// - may want to use art from localstorage that the player set elsewhere?
-		// - @todo continue to refine
+		// - @todo continue to refine; clearly we don't always want to spawn a player
 
 		const props = { ...args.entity.spawner_props }
 
-		props.uuid = args.sys.systemid
+		props.uuid = args.sys.selfid
 
-		sys.resolve(props)
+		if(!props.uuid) throw "player needs a self id"
+
+		args.sys.resolve(props)
 
 		console.log("player spawner: spawning a player")
 

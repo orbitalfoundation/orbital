@@ -1,4 +1,5 @@
 
+import { paper_ssr } from '../paper/paper-ssr.js'
 
 import * as fs from 'fs'
 import * as http from 'http'
@@ -54,68 +55,120 @@ const find_local_file = async(req) => {
 
 	let pathname = rewrite_routes_from_url(req)
 	let resource
+	let leaf = ''
 
-	try {
-
-		// find exact file?
-		resource = path.join(root,pathname)
-		console.log("server::http: looking for ",resource,pathname)
-		let stats = fs.statSync(resource)
-		stats.resource = resource
-		if(!stats.isDirectory()) return stats
-
-		// a request for a directory without a trailing "/" will cause terrible grief to clients later - force promote to be a real directory request
-		if(!pathname.endsWith('/')) {
-			return { redirect: pathname+"/" }
-		}
-
-		// a request for a directory is legal if there is an index.html below it (for spa apps this is legal)
-		try {
-			resource = path.join(root,pathname,'index.html')
-			let stats = fs.statSync(resource)
-			stats.resource = resource
-			if(!stats.isDirectory()) return stats
-		} catch(err) {
-			console.error("server::http",err)
-		}
-
-	} catch(err) {
-		console.error("server::http",err)
+	// if the pathname ends in an index.html then redirect to base of that
+	if(pathname.endsWith('index.html')) {
+		pathname = pathname.substr(0,-10)
+		//console.log("http: redirecting path to strip index.html",req.path,pathname)
+		return { redirect: pathname }
 	}
 
-	// if there are no parts to the path then try return the absolute root index.html as a spa app
-	const parts = pathname.match(/[^\/]+/g)
-	if(!parts || parts.length <= 1) {
-		try {
-			resource = path.join(root,"index.html")
-			let stats = fs.statSync(resource)
-			stats.resource = resource
-			if(!stats.isDirectory()) return stats
-		} catch(err) {
-			console.error("server::http",err)
-		}
-	}
-
-	// otherwise if there are parts to the url path then try return the parent index.html - basically we are on some spa app route
-	else {
-		parts.pop()
-		pathname = parts.join('/')
+	// if pathname ends in a slash then try return pathname/index.html
+	if(pathname.endsWith('/')) {
 		resource = path.join(root,pathname,'index.html')
-		try {
+		if(fs.existsSync(resource)) {
 			let stats = fs.statSync(resource)
 			stats.resource = resource
-			if(!stats.isDirectory()) return stats
-		} catch(err) {
-			console.error("server::http",err)
+			if(!stats.isDirectory()) {
+				//console.log("http: found spa resource",resource)
+				return stats
+			}
+			//console.log("http: did not find spa resource",resource)
 		}
+	}
+
+	// else look for an ordinary file
+	else {
+		resource = path.join(root,pathname)
+		if(fs.existsSync(resource)) {
+			let stats = fs.statSync(resource)
+			stats.resource = resource
+			if(!stats.isDirectory()) {
+				//console.log("http: found file resource",resource)
+				return stats
+			}
+			//console.log("http: did not find file resource",resource)
+		}
+	}
+
+	// recursively search upwards for best spa index to run
+	const parts = pathname.match(/[^\/]+/g) || []
+	while(true) {
+		resource = path.join(root,...parts,"index.html")
+		console.log("http: looking upwards for resource",resource)
+		if(fs.existsSync(resource)) {
+			let stats = fs.statSync(resource)
+			stats.resource = resource
+			if(!stats.isDirectory()) {
+				//  the client is hopefully smart enough to understand the path for spa apps is relative
+				return stats
+				// alternatively a redirect could be used but then urls are not web persistent
+				// resource = path.join(...parts) + "/"
+				// console.log("http: redirecting to ",resource)
+				// return { redirect: resource }
+			}
+		}
+		if(!parts.length) break
+		parts.pop()
 	}
 
 	// or just give up
 	return null
 }
 
+const proxy = async(req,res) => {
 
-const http_handle_request = async (req, res) => {
+	if(req.url !== "/proxy") return false
+
+	const url = req.headers.proxy
+	delete req.headers.proxy
+
+	let requestBody = ''
+
+	req.on('data', chunk => {
+		requestBody += chunk.toString()
+	})
+
+	req.on('end', async () => {
+
+		try {
+
+			const sendme = req.method.toLowerCase() === 'post' ? JSON.parse(requestBody) : null
+			const options = {
+				method: req.method,
+				headers : req.headers,
+			}
+			if(sendme) options.body = JSON.stringify(sendme)
+
+			const response = await fetch(url, options )
+			const json = await response.json()
+			const body = JSON.stringify(json)
+
+			res.writeHead(response.status,{
+				...response.headers,
+				'Content-Length': body.length,
+				'Content-Type': 'application/json',				
+			})
+
+			res.end(body)
+
+		} catch (error) {
+			console.error('Proxy request failed:', error);
+			res.writeHead(500, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Proxy request failed' }));
+		}
+	})
+
+	return true
+}
+
+let sys = null
+let memoized = {}
+
+async function http_handle_request(req, res) {
+
+	if( await proxy(req,res) ) return
 
 	let stats = await find_local_file(req)
 
@@ -134,17 +187,60 @@ const http_handle_request = async (req, res) => {
 		return
 	}
 
-	fs.readFile(stats.resource,'binary',(err, data) => {
+	fs.readFile(stats.resource,'binary', async (err, data) => {
 		if(err) {
 			res.writeHead(500, {'Content-Type': 'text/plain'})
 			res.write(err)
 			res.end()
 			return
 		}
+
+		//
+		// ssr attempt
+		//
+		// pastes the ssr in first and then the live site after - this should be good enough for the client to figure things out ...
+		//
+		// this code fakes a client side request effectively; and then asks paper to produce an ssr version of itself
+		// this requires the request path to be sensible for server side resources ( see sys meta and sys side import maps )
+		//
+		// - needs to fetch the correct index.js - and this is currently only fetching the root one @todo
+		//
+		// - could flush the paper nodes after fetching them ... but it isn't strictly necessary to do so
+		//
+		// - we must not load things like volume-3js - this still needs thought @todo
+		//
+
+		let ssrdata = ""
+
+		if(false && sys && stats.resource.endsWith("index.html")) {
+			ssrdata = memoized[stats.resource]
+			if(!ssrdata) {
+				console.log("server: attempting fresh ssr on ",stats.resource,sys.meta.dirname)
+				try {
+					await sys.resolve({dependencies:["/index.js"]})
+					memoized[stats.resource] = ssrdata = paper_ssr(sys,"https://orbital.foundation/") || ""
+					// const candidates = sys.query({paper:true})
+					// candidates.forEach(c=>{ sys.resolve({uuid:c.uuid,obliterate:true}) })
+				} catch(err) {
+					console.error("server: ssr failed",err)
+				}
+			}
+		}
+
+		// write header
 		const mime = mimeTypes[stats.resource.split('.').pop()] || 'text/plain'
-		res.writeHead(200, { 'Content-Type': mime, 'Content-Length': stats.size })
-		res.write(data,'binary')
-		res.end()
+
+		if(!ssrdata.length) {
+			res.writeHead(200, { 'Content-Type': mime, 'Content-Length': stats.size })
+			res.write(data,'binary')
+			res.end()
+		} else {
+			let out = ssrdata + data
+			res.writeHead(200, { 'Content-Type': mime, 'Content-Length': Buffer.byteLength(out,'utf8') })
+			res.write(out)
+			res.end()
+		}
+
 	})
 
 }
@@ -155,14 +251,14 @@ export class Server {
 	io = null
 	sys = null
 
-	constructor(sys) {
-		this.sys = sys
-		if(!sys || !sys.systemid) throw "Must have sys and sys.systemid"
+	constructor(_sys) {
+		sys = this.sys = _sys
+		if(!sys || !sys.selfid) throw "Must have sys and sys.selfid"
 		const port = sys && sys.config && sys.config.network_port ? sys.config.network_port : DEFAULT_PORT
+		console.log(http_handle_request.sys ? true : false)
 		this.http = http.createServer(http_handle_request).listen(port)
 		this.io = new Socket.Server(this.http)
 		this.io.on('connection', this.fresh_connection.bind(this) )
-		this.io.on('disconnect', this.disconnect.bind(this) )
 	}
 
 	async server_network_react(args) {
@@ -182,7 +278,7 @@ export class Server {
 			return
 		}
 
-		if(args.entity.networkid && args.entity.networkid !== this.sys.systemid) {
+		if(args.entity.networkid && args.entity.networkid !== this.sys.selfid) {
 			//console.log("server: rejecting sending 2",args)
 			// console.error("server: asked to publish something it does not own",args)
 			// it is actually possible for this to occur - traffic is not fully filtered by the time it gets here
@@ -190,10 +286,10 @@ export class Server {
 		}
 
 		// take ownership
-		args.entity.networkid = this.sys.systemid
+		args.entity.networkid = this.sys.selfid
 
 		// always mark the traffic source
-		args.blob.networkid = this.sys.systemid
+		args.blob.networkid = this.sys.selfid
 
 		const sockets = await this.io.fetchSockets()
 		for(let socket of sockets) {
@@ -202,20 +298,62 @@ export class Server {
 
 	}
 
-	disconnect(socket) {
-		console.log("server ********** server disconnect ",socket.id)
-		// - stop sending heartbeats for this channel
-		// - delete volatile transient objects owned by this channel and publish to all
+	async disconnect_and_obliterate(socket) {
+		console.log("server: server disconnect ",socket)
+
+		// @todo add a heartbeat system? clients can delete on loss of heartbeat
+		// @todo do not delete truly persistent objects
+		// @todo make sure to write to persistence layer
+
+		// mark some entities as 'obliterated' - which observers can listen to and remove their records
+
+		const candidates = await this.sys.query({})
+		for(const entity of candidates) {
+			if(entity.uuid && entity.network && entity.networkid && entity.networkid === socket.id && !entity.persist) {
+
+				const data = {
+					uuid:entity.uuid,
+					networkid:entity.networkid,
+					networkhost:entity.networkhost,
+					network:true,
+					network_remote:true,
+					obliterate:true
+				}
+
+				// allow system to deal with the obliterate event; typically storage but also any observers can react
+				this.sys.resolve(data)
+
+				// for now manually echo to everybody else
+				// @todo improve: currently server rejects traffic not sponsored by server
+				// @todo we really don't want to multicast like this since it bypasses reactivity
+				const sockets = await this.io.fetchSockets()
+				for(let other of sockets) {
+					if(other.id == socket.id || data.networkid == other.id) continue
+					other.emit('data',data)
+				}
+			}
+		}
 	}
 
 	async fresh_connection(socket) {
-		console.log("server: ***************** fresh connection",socket.id)
+
+		console.log("server: fresh connection",socket.id)
+
+		// start watching disconnect
+		socket.on('disconnect', ()=>{ this.disconnect_and_obliterate(socket) } )
+
+		// start watching fresh data
 		socket.on('data', (data) => {
 			this.consume_incoming_data(socket,data)
 		})
+
+		// for now send initial state right away - @todo the client should actually proactively ask for this
+		await this.send_fresh_data(socket)
 	}
 
 	async send_fresh_data(socket) {
+
+		console.log("server: websocket got a query request - sending all db items for now - @todo refine",socket.id)
 
 		// publish a fresh copy of all state to that client - sending also remote entities that happen to exist already
 
@@ -231,7 +369,7 @@ export class Server {
 			if(entity.network) {
 				if(!entity.networkid) {
 					console.warn("server: had to grant networkid",entity.uuid)
-					entity.networkid = this.sys.systemid
+					entity.networkid = this.sys.selfid
 				}
 				if(entity.networkid !== socket.id) {
 					console.log("********* network server sending fresh whole",entity.uuid)
@@ -258,9 +396,7 @@ export class Server {
 		data.network_remote = true
 
 		// the server can react to some events - preventing them from going further
-		console.log(data)
 		if(data.server_query) {
-			console.log("server: websocket got a query request - sending all db items for now - @todo refine")
 			await this.send_fresh_data(socket)
 			return
 		}

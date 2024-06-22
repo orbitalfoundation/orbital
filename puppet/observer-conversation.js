@@ -1,15 +1,15 @@
 
-import { converse } from './server/converse.js'
+import { converse_queue, converse_fragment } from './server/converse.js'
 
 ///
-/// Intercept player-to-player conversations
+/// Intercept player-to-player conversations and pass to npcs 
 ///
 
 export const observer = {
 
 	about: 'puppet observer conversation - server side',
 
-	observer: async (args) => {
+	observer: async function (args) {
 
 		// ignore tick for sanity
 		if(args.blob.tick) return
@@ -17,65 +17,81 @@ export const observer = {
 		// intercept general player-to-player text conversations only
 		if(!args.blob.conversation || !args.blob.conversation.text) return
 
-		// query for puppets
-		const entities = args.sys.query({puppet:true})
-
-		// randomize just to prevent any kind of order dependent biases in targeting
-		entities.sort(() => Math.random() - 0.5)
-
-		// find puppets to converse with
-		for(const entity of entities) {
-
-			// filter by able to hold a conversation?
-			if(!entity.puppet.reason) continue
-
-			// spatially nearby?
-			if(entity.volume && entity.volume.transform && entity.volume.transform.xyz && args.blob.conversation.xyz) {
-				const xyz1 = entity.volume.transform.xyz
-				const xyz2 = args.blob.conversation.xyz
-				let x = xyz1[0] - xyz2[0]
-				let y = xyz1[1] - xyz2[1]
-				let z = xyz1[2] - xyz2[2]
-				if( x*x + y*y + z*z > 3*3) {
-					console.warn("puppet::converse - participants are are too far apart to chat")
-					return false
-				}
-			}
-
-			// busy?
-			// @todo could look at how long it has been busy for as a way to avoid getting stuck in a busy state
-			if(entity.puppet.busy) {
-				console.warn("puppet::converse - puppet is too busy to talk",entity.uuid)
-				return
-			}
-
-			// uuid
-			let targetuuid = entity.uuid
-
-			// build utterance that will be passed to the lower level conversation handler
-			const utter = {
-				// the props for how to shape the performance
-				... entity.puppet,
-				// what to say
-				text: args.blob.conversation.text,
-			}
-
-			let helper = (performance)=>{
-				// set the target uuid on the performance - i prefer to have performances be fresh entities
-				performance.targetuuid = targetuuid
-				// the text to speech is returned in many small fragments - send each one as a fresh new entity
-				// @todo i need some kind of mechanic to time out performance objects from the database or delete them
-				sys.resolve({uuid:null,performance})
-				// speculatively mark the puppet as busy to reduce traffic; done here to avoid latency loop back
-				sys.resolve({uuid:targetuuid,puppet:{busy:Date.now()}})
-			}
-
-			// have a more application neutral converse() method perform the text to speech (or reject)
-			let success = converse(utter,helper)
-
-			// if the puppet responded it probably makes sense to stop also sending the message to other puppets
-			if(success) break
+		// pick entity
+		let entity = findPartyToTalkTo(sys,args.blob.conversation.xyz)
+		if(!entity || !entity.puppet) {
+			console.warn("puppet::converse - nobody to talk to")
+			return
 		}
+
+		// perform reasoning and get back a list of things to say
+		const queue = await converse_queue(entity.puppet,args.blob.conversation.text)
+
+		// pipe each thing to say through text to speech and then to the client
+		for(let segment = 0;segment < queue.length;segment++) {
+
+			const performance = await converse_fragment(entity.puppet,queue[segment])
+
+			// set the target uuid on the performance - this is the npc that will speak
+			performance.targetuuid = entity.uuid
+
+			// send event to npc - note the uuid is set to null to force generate a new uuid; arguably however we may just want transient entities that don't pollute db @todo
+			await args.sys.resolve({uuid:null,performance})
+
+			// speculatively mark the puppet as busy to reduce inbound traffic; done here to avoid latency loop back
+			await args.sys.resolve({uuid:entity.uuid,puppet:{busy:Date.now()}})
+
+			// force mark the puppet as busy just to prevent a one frame gap where something could slip through
+			entity.puppet.busy = true
+		}
+
+		// return face to neutral
+		await args.sys.resolve({uuid:null,performance:{targetuuid:entity.uuid,emotion:'neutral'}})
+
 	}
 }
+
+const findPartyToTalkTo = (sys,xyz) => {
+
+	// query volatile local state for puppets
+	const entities = sys.query({puppet:true})
+
+	// randomize just to prevent any kind of order dependent biases in targeting
+	entities.sort(() => Math.random() - 0.5)
+
+	let best = null
+	let distance = 9999999
+	for(const entity of entities) {
+
+		// can hold a conversation?
+		if(!entity.puppet.reason) continue
+
+		// busy?
+		// @todo could look at how long it has been busy for as a way to avoid getting stuck in a busy state?
+		else if(entity.puppet.busy) {
+			console.warn("puppet::converse - puppet is too busy to talk",entity.uuid)
+			continue
+		}
+
+		// distance?
+		else if(entity.volume && entity.volume.transform && entity.volume.transform.xyz && xyz) {
+			const xyz1 = entity.volume.transform.xyz
+			let x = xyz1[0] - xyz[0]
+			let y = xyz1[1] - xyz[1]
+			let z = xyz1[2] - xyz[2]
+			let d = x*x + y*y + z*z
+			if( d > 10*10) continue
+			if( d < distance ) {
+				distance = d
+				best = entity
+			}
+		} else {
+			best = entity
+			break
+		}
+	}
+
+	return best
+}
+
 

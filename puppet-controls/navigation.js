@@ -2,7 +2,7 @@
 // although this uses babylon it works in 3js also
 // @todo have some kind of generic math library
 
-import "@orbital/volume-babylon3d/libs/babylon.js"
+import "../volume-babylon3d/libs/babylon.js"
 
 function navigate(event,entity,sys) {
 
@@ -13,13 +13,15 @@ function navigate(event,entity,sys) {
 
 	const transform = entity.volume.transform
 
+	// @todo note that these are 'live' values on the actual transform - may not want to do this
 	const xyz = transform.xyz || [ 0,0,0 ]
 	const ypr = transform.ypr || [ 0,0,0 ]
 
 	let m = 0
+	let x = 0
 	switch(event.keyCode) {
-		case 39: ypr[1] -=0.1; break
-		case 37: ypr[1] +=0.1; break
+		case 39: event.shiftKey ? x = -0.1 : ypr[1] -=0.1; break
+		case 37: event.shiftKey ? x = 0.1 : ypr[1] +=0.1; break
 		case 40: m = -0.1; break
 		case 38: m = 0.1; break
 		default: return
@@ -27,14 +29,14 @@ function navigate(event,entity,sys) {
 
 	// get current orientation as euler and use to estimate translation target
 	let rot = BABYLON.Quaternion.FromEulerAngles(...ypr)
-	let vec = new BABYLON.Vector3(0,0,m).rotateByQuaternionToRef(rot,BABYLON.Vector3.Zero())
+	let vec = new BABYLON.Vector3(x,0,m).rotateByQuaternionToRef(rot,BABYLON.Vector3.Zero())
 
 	// translate as a function of direction
 	xyz[0] += vec.x
 	xyz[1] += vec.y
 	xyz[2] += vec.z
 
-	// set targets
+	// set targets for smoothing
 	transform.target_xyz = xyz
 	transform.target_ypr = ypr
 
@@ -42,7 +44,7 @@ function navigate(event,entity,sys) {
 	sys.resolve({
 		uuid: entity.uuid,
 		volume: {
-			transform: { xyz }
+			transform: { xyz, ypr }
 		}
 	})
 
