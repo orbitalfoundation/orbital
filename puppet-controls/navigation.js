@@ -13,7 +13,10 @@ function navigate(event,entity,sys) {
 
 	const transform = entity.volume.transform
 
-	// @todo note that these are 'live' values on the actual transform - may not want to do this
+	// @todo note that this only works because of the way memory is being shared
+	// the entity.volume.transform.xyz is a 'live' property on the last time it was written to db
+	// realistically we should be polling for the entity and using that instead
+
 	const xyz = transform.xyz || [ 0,0,0 ]
 	const ypr = transform.ypr || [ 0,0,0 ]
 
@@ -54,24 +57,23 @@ let handler = null
 
 export const navigation_observer = {
 	about: 'navigation observer',
-	observer: (args) => {
-		// @todo should be able to de-register self from observation 
-		if(args.blob.tick) return false
-		if(!args || !args.entity || !args.fresh || !args.entity.navigation || args.entity.network_remote) return false
+	resolve: (blob,sys) => {
+		if(blob.tick) return blob
+		if(!blob.navigation) return blob
 
 		if (typeof window === 'undefined' || document === 'undefined') {
 			console.error("navigation: should not be run on server")
-			return false
+			return blob
 		}
 
 		if(handler == null) {
 			handler = document.addEventListener('keydown',(event) => {
-				navigate(event,args.entity,args.sys)
+				navigate(event,blob,sys)
 			})
 		}
 
 		// slight hack; force an earlier reaction to the entity since it is 'pure'
-		navigate({key:'r'},args.entity,args.sys)
+		navigate({key:'r'},blob,sys)
 		return true
 	}
 }

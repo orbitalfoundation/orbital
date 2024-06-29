@@ -9,23 +9,23 @@ export const observer = {
 
 	about: 'puppet observer conversation - server side',
 
-	observer: async function (args) {
+	resolve: async function (blob,sys) {
 
 		// ignore tick for sanity
-		if(args.blob.tick) return
+		if(blob.tick) return blob
 
 		// intercept general player-to-player text conversations only
-		if(!args.blob.conversation || !args.blob.conversation.text) return
+		if(!blob.conversation || !blob.conversation.text) return blob
 
 		// pick entity
-		let entity = findPartyToTalkTo(sys,args.blob.conversation.xyz)
+		let entity = findPartyToTalkTo(sys,blob.conversation.xyz)
 		if(!entity || !entity.puppet) {
 			console.warn("puppet::converse - nobody to talk to")
-			return
+			return blob
 		}
 
 		// perform reasoning and get back a list of things to say
-		const queue = await converse_queue(entity.puppet,args.blob.conversation.text)
+		const queue = await converse_queue(entity.puppet,blob.conversation.text)
 
 		// pipe each thing to say through text to speech and then to the client
 		for(let segment = 0;segment < queue.length;segment++) {
@@ -36,18 +36,19 @@ export const observer = {
 			performance.targetuuid = entity.uuid
 
 			// send event to npc - note the uuid is set to null to force generate a new uuid; arguably however we may just want transient entities that don't pollute db @todo
-			await args.sys.resolve({uuid:null,performance})
+			await sys.resolve({uuid:null,performance})
 
 			// speculatively mark the puppet as busy to reduce inbound traffic; done here to avoid latency loop back
-			await args.sys.resolve({uuid:entity.uuid,puppet:{busy:Date.now()}})
+			await sys.resolve({uuid:entity.uuid,puppet:{busy:Date.now()}})
 
 			// force mark the puppet as busy just to prevent a one frame gap where something could slip through
 			entity.puppet.busy = true
 		}
 
 		// return face to neutral
-		await args.sys.resolve({uuid:null,performance:{targetuuid:entity.uuid,emotion:'neutral'}})
+		await sys.resolve({uuid:null,performance:{targetuuid:entity.uuid,emotion:'neutral'}})
 
+		return blob
 	}
 }
 

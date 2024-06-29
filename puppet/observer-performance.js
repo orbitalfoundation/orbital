@@ -13,18 +13,19 @@ import { Puppet } from './client/puppet-talkinghead.js'
 
 export const puppet_client_side_performance_observer = {
 	about: 'puppet observer - client side',
-	observer: (args) => {
-		if(isServer) return
-		if(args.blob.tick) return
-		if(!args.blob.performance) return
-		const entities = args.sys.query({uuid:args.blob.performance.targetuuid})
+	resolve: (blob,sys) => {
+		if(isServer) return blob
+		if(blob.tick) return blob
+		if(!blob.performance) return blob
+		const entities = sys.query({uuid:blob.performance.targetuuid})
 		if(!entities || entities.length != 1) {
-			console.error("puppet performance - entity query problem",args,entities)
-			return
+			console.error("puppet performance - entity query problem",blob,entities)
+			return blob
 		}
 		const handler = handler_bind(entities[0])
-		if(!handler)return
-		handler.perform(args.blob.performance)
+		if(!handler)return blob
+		handler.perform(blob.performance)
+		return blob
 	}
 }
 
@@ -34,16 +35,17 @@ export const puppet_client_side_performance_observer = {
 
 export const puppet_client_side_tick_observer = {
 	about: 'puppet tick observer - client side',
-	observer: (args) => {
-		if(isServer) return
-		if(!args.blob.tick) return
-		const entities = args.sys.query({puppet:true})
+	resolve: (blob,sys) => {
+		if(isServer) return blob
+		if(!blob.tick) return blob
+		const entities = sys.query({puppet:true})
 		entities.forEach( (entity) => {
 			const handler = handler_bind(entity)
-			if(!handler) return
-			handler.update(args.blob.time,args.blob.delta)
-			handler_busy_flag(args.sys,entity,handler)
+			if(!handler) return blob
+			handler.update(blob.time,blob.delta)
+			handler_busy_flag(sys,entity,handler)
 		})
+		return blob
 	}
 }
 
@@ -53,7 +55,7 @@ export const puppet_client_side_tick_observer = {
 
 const handler_bind = (entity) => {
 	if(!entity.puppet || !entity.volume || !entity.volume._node) {
-		console.error("puppet performance - invalid target entity",entity)
+		//console.error("puppet performance - invalid target entity",entity)
 		return null
 	}
 	if(!entity.puppet._handler) {

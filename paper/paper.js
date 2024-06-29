@@ -65,8 +65,7 @@ const document = isServer ? _paper_document_serverside : window.document
 
 function _paper_dom_rebind(sys,path,entity,paper,parent_paper=null) {
 
-
-	const invisible = paper.invisible = paper.match && paper.match !== path
+	const invisible = paper.invisible = ( paper.match && paper.match !== path ) ? true : false
 
 	if(invisible) {
 		if(paper._dom) {
@@ -221,7 +220,6 @@ function _paper_dom_rebind(sys,path,entity,paper,parent_paper=null) {
 		}
 	}
 
-
 // @todo should be hiding and showing to the SAME POINT as before not inserting at the end
 
 	// adjust attachment point if needed
@@ -315,22 +313,14 @@ function _paper_dom_effects(paper) {
 // hide or show a node (effectively synchronize the state between our db model and the dom)
 //
 
-function _paper_evaluate_entity_against_path(sys,path,entity,blob,parent=null) {
-
-	if(!entity) {
-		console.error("paper: no entity?",path)
-		console.log(blob)
-		return
-	}
+function _paper_evaluate_entity_against_path(sys,path,entity,parent=null) {
 
 	const paper = entity.paper
 	paper.uuid = entity.uuid
-	paper.id = entity.id
 
 	// may attach to dom or mark as invisible
 	_paper_dom_rebind(sys,path,entity,paper,parent)
 
-	// build or rebuild children
 	// children of paper can skip the .paper attribute for now @todo may remove this feature
 	// @todo later allow children ids to be used rather than using a hardcoded counter
 	if(!paper.invisible && paper.children && paper.children.length) {
@@ -339,7 +329,7 @@ function _paper_evaluate_entity_against_path(sys,path,entity,blob,parent=null) {
 			const p = child.paper ? child.paper : child
 			//p.parent = entity.uuid - don't set this - pass it by hand
 			const _scratch = { uuid:`${paper.uuid}/${++counter}`, paper:p }
-			_paper_evaluate_entity_against_path(sys,path,_scratch,null,paper)
+			_paper_evaluate_entity_against_path(sys,path,_scratch,paper)
 		}
 	}
 
@@ -364,11 +354,9 @@ function _paper_get_path(url,anchor) {
 // an event has occured - intercept only paper events
 //
 
-function observer(args) {
-	if(args.blob.tick) return
-	if(!args.blob.paper) return
+async function resolve(blob,sys) {
 
-	const sys = args.sys
+	if(!blob.paper) return blob
 
 	//
 	// allow an anchor to be specified
@@ -376,8 +364,8 @@ function observer(args) {
 	//
 
 	let anchor = this.anchor || null
-	if(args.blob.paper.anchor) {
-		anchor = args.blob.paper.anchor
+	if(blob.paper.anchor) {
+		anchor = blob.paper.anchor
 		anchor = decodeURI((new URL(anchor)).pathname)
 		anchor = anchor.substr(0, anchor.lastIndexOf('/'))
 		if(anchor == "/") anchor = null
@@ -386,36 +374,42 @@ function observer(args) {
 	}
 
 	//
-	// once only - setup router that will update all elements on browser navigation event
+	// once only - setup router that will update all elements on browser navigation event and set the current this.url
 	//
 
 	if(!isServer && !this.router) {
 		this.url = "/"
+
+
 		this.router = new Router((url)=>{
 			this.url = url
 			console.log("paper: router refreshing with url",url)
 			const path = _paper_get_path(this.url,anchor)
 			const candidates = sys.query({paper:true})
 			candidates.forEach(entity=>{
-				_paper_evaluate_entity_against_path(sys,path,entity,null)
+				_paper_evaluate_entity_against_path(sys,path,entity)
 			})
 		})
 
-		// force the url to be updated even before scene is complete - to force sync early state
+		// skip evaluation of the current element because the sys.query() above will discover it
+		//const path = _paper_get_path(this.url,anchor)
+		//_paper_evaluate_entity_against_path(sys,path,blob)
+
+		// force the url to be updated even before scene is complete
 		// @todo arguably this could be deferred to the last item but i can't tell when that happens
 		// @todo maybe i could broadcast a load completion event that is caught here?
 		this.router.broadcast_change()
+	} else {
 
-		// no need to run the below since the above will force the update
-		return
+		//
+		// re-evaluate a single element when it changes - there's a chance it may be visible and have changes
+		//
+
+		const path = _paper_get_path(this.url,anchor)
+		_paper_evaluate_entity_against_path(sys,path,blob)
 	}
 
-	//
-	// evaluate a single element when it changes
-	//
-
-	const path = _paper_get_path(this.url,anchor)
-	_paper_evaluate_entity_against_path(sys,path,args.entity,args.blob)
+	return blob
 }
 
 ///
@@ -424,6 +418,6 @@ function observer(args) {
 
 export const paper_component_observer = {
 	about:'paper component observer',
-	observer
+	resolve
 }
 

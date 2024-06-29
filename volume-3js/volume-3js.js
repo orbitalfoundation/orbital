@@ -23,7 +23,7 @@ document.head.append(im)
 
 if(typeof document !== 'undefined') {
 	const im = document.createElement('script')
-	im.src = "@orbital/volume-3js/meshopt_decoder.js"
+	im.src = "/orbital/volume-3js/meshopt_decoder.js"
 	document.head.append(im)
 }
 
@@ -306,11 +306,20 @@ class VolumeManager {
 
 		//////////////////////////////////////////////////////////////////////////////////////
 
+		if(volume.light && !volume._node) {
+			// @todo improve - copy from babylon
+			volume._node = this.light
+		}
+
+		else if(volume.camera && !volume._node) {
+			volume._node = this.camera
+		}
+
 		// assign geometry and load art
 		// @todo this runs once only for now improve later
 		// @todo detect dynamic changes to this string later and delete previous; this is just a quick hack to get some art assets loaded up for now
 
-		if(volume.geometry && !volume._node && !volume._node_tried_load &&
+		else if(volume.geometry && !volume._node && !volume._node_tried_load &&
 			(volume.geometry.endsWith(".glb") || volume.geometry.endsWith(".gltf") || volume.geometry.endsWith(".vrm") )
 		)
 		{
@@ -421,7 +430,14 @@ class VolumeManager {
 
 	_update_pose(volume) {
 
-		if(!volume.transform || !volume._node) return
+		if(!volume.transform) {
+			volume.transform = { xyz:[0,0,0], ypr:[0,0,0], whd:[0,0,0]}
+		}
+
+		if(!volume._node) {
+			console.warn("volume-3js - entity missing props",volume)
+			return
+		}
 
 		const transform = volume.transform
 		const node = volume._node
@@ -502,21 +518,31 @@ class VolumeManager {
 	// deal with changes to entities that have volumes
 	//
 
-	async resolve(entity,parent=null) {
+	async resolve(blob,parent=null) {
 
-		// @todo for now force grant a uuid to each entity
-		// I am actually unsure about this concept... sys should own it?
-		// i do need some kind of uuid per node but children nodes are not visible to sys
-		// another idea is that 3js grants locally good enough uuids i believe?
-		if(!entity.uuid) {
-			this.uuid++
-			entity.uuid = parent ? `${parent.uuid}/${this.uuid}` : `${uuid}`
-			console.warn("volume-3js: force granted uuid",entity.uuid)
+		// ignore invalid
+		if(!blob.uuid) {
+			console.warn('volume-3js - blob has no uuid',blob)
+			return
+		}
+
+		// stuff this in for now
+		blob.volume.uuid = blob.uuid
+
+		// for now keep track of entity state ourselves - unfolding entire entity here
+		let entity = this.entities[blob.uuid]
+		if(!entity) {
+			entity = this.entities[blob.uuid] = blob
+		} else {
+			const volume = { ...entity.volume, ...blob.volume }
+			entity = this.entities[blob.uuid] = { ...entity, ...blob }
+			entity.volume = volume
 		}
 
 		if(entity.obliterate) {
-			console.log("volume-3js: being asked to destroy entity",entity)
+			console.log("volume-3js: being asked to destroy entity",blob)
 			if(entity.volume && entity.volume._node) {
+				delete _volume_entities[blob.uuid]
 				entity.volume._node.removeFromParent()
 				entity.volume._node = null
 			}
@@ -524,66 +550,69 @@ class VolumeManager {
 			return
 		}
 
-		// store the entity
-		this.entities[entity.uuid] = entity
-
-		// for now update these right away - this could be done in the update loop instead @todo
+		// perform updates to entity right now - this could be deferred to update loop @todo
 		await this._update_miscellaneous(entity.volume)
 
-		// recursively update children (assumption is they are also volume nodes)
-		// @todo if just a parent is being modified we shouldn't bother revisiting all the children?
-		// @todo must actually attach to parent
-		if(entity.children) {
-			for(const child in entity.children) {
-				if(!child.volume) {
-					console.error("volume-3jw: child has no volume",child,entity)
-				} else {
-					await this.resolve(child,entity)
-				}
-			}
+		// peek directly at entity children as a convenience
+		if(!entity.children) return
+		let counter = 0
+		for(const child of entity.children) {
+			if(!child.volume) continue
+			if(!child.uuid) child.uuid = `${entity.uuid}/child-${counter++}`
+			await this.resolve(child,entity)
 		}
-
 	}
 
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 
-const volume_managers = {}
+const _volume_managers = {}
+const _volume_entities = {}
 
-function _volume_manager_bind(entity) {
+function _volume_manager_get(blob) {
 
-	let key = entity.volume.dom
-
-	// use first volume if none specified
-	if(!key) {
-		console.log("volume - key not found so binding to default",entity)
-		const values = Object.values(volume_managers)
-		return values.length ? values[0] : null
-	}
-
-	// use specified if found
-	let manager = volume_managers[key]
+	// is there a manager?
+	let manager = _volume_entities[blob.uuid]
 	if(manager) {
 		return manager
 	}
 
-	// create new - the key is overloaded to refer to an existing DOM node in the html scenegraph
-	let elem = document.getElementById(key)
+	// is there a specific dom name to bind a manager to?
+	const name = blob.volume.dom && blob.volume.dom.length ? blob.volume.dom : null
 
-	// if there is no dom node for a volume then just take over the whole screen for now
+	// if there is no name but if a previous manager exists then bind to it - else invent a name
+	if(!name) {
+		const values = Object.values(_volume_managers)
+		if(values.length) {
+			manager = _volume_entities[blob.uuid] = values[0]
+			return manager
+		}
+		name = 'volume001'
+	}
+
+	// return manager if found
+	manager = _volume_managers[name]
+	if(manager) {
+		_volume_entities[blob.uuid] = manager
+		return manager
+	}
+
+	// look at the dom itself
+	let elem = document.getElementById(name)
+
+	// force create if none
 	if(!elem) {
-		console.log("volume: taking over entire display because no parent html element was provided/found",key)
+		console.log("volume: taking over entire display because no parent html element was provided/found",name)
 		elem = document.createElement("div")
 		elem.style = "width:100%;height:100%;padding:0px;margin:0px;position:absolute;top:0;left:0"
-		elem.id = key
+		elem.id = name
 		document.body.appendChild(elem)
 	} else {
 		//console.log("volume: attaching to a provided html node for rendering",key)
 	}
 
-	// attach
-	manager = volume_managers[key] = elem._volume_manager = new VolumeManager(elem)
+	manager = _volume_entities[blob.uuid] = _volume_managers[name] = new VolumeManager(elem)
 	return manager
 }
 
@@ -593,25 +622,30 @@ function _volume_manager_bind(entity) {
 ///
 
 export const volume_observer = {
+
 	about: 'volume observer using 3js',
-	observer: async (args) => {
-		if(!args) return
-		if(args.blob && args.blob.name == 'tick') {
-			Object.values(volume_managers).forEach(manager=>{
-				manager.update(args.blob.time,args.blob.delta)
+	resolve: async (blob) => {
+
+		if(blob.tick) {
+			Object.values(_volume_managers).forEach(manager=>{
+				manager.update(blob.time,blob.delta)
 			})
+			return blob
 		}
-		else if(args.entity && args.entity.volume) {
 
-			// before doing any work we must define which volume the entity is associated with
-			let manager = _volume_manager_bind(args.entity)
-			if(!manager) {
-				console.warn("volume: no volume surface target associated with entity",args.entity)
-				return
-			}
-
-			// just have the volume manager store the entity - it is reactive because it is real time
-			await manager.resolve(args.entity,null)
+		if(!blob.volume) {
+			return blob
 		}
+
+		if(!blob.uuid) {
+			console.warn('volume: volume entity must have uuid')
+			return blob
+		}
+
+		let manager = _volume_manager_get(blob)
+
+		await manager.resolve(blob,null)
+
+		return blob
 	}
 }

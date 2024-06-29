@@ -1,67 +1,69 @@
 
-//import crypto from 'crypto'
-//function uuidv4() {
-//	if(typeof crypto !== 'undefined') {
-//		return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16) )
-//	}
-//	return 0
-//}
+import { append } from './append.js'
 
-///
-/// https://stackoverflow.com/questions/105034/how-do-i-create-a-guid-uuid
-/// Public Domain/MIT
-///
+const uuid = "orbital/sys/uuid.js"
 
-const uuidv4 = () => {
-	var d = new Date().getTime();//Timestamp
-	var d2 = ((typeof performance !== 'undefined') && performance.now && (performance.now()*1000)) || 0;//Time in microseconds since page-load or 0 if unsupported
-	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-		var r = Math.random() * 16;//random number between 0 and 16
-		if(d > 0){//Use timestamp until depleted
-			r = (d + r)%16 | 0;
-			d = Math.floor(d/16);
-		} else {//Use microseconds since page-load if supported
-			r = (d2 + r)%16 | 0;
-			d2 = Math.floor(d2/16);
-		}
-		return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-	});
-}
+const description = `UUID observer stores objects with uuids in transient storage; it is append only, there is no way to remove properties yet. Also provides a query interceptor.`
 
-///
-/// generate a local uuid using local storage for persistence
-/// it's beneficial to at least have some kind of persistence so that preferences exist between refreshes of the browser page
-///
+const resolve = async function(blob,sys) {
 
-export const uuid_client = () => {
-	if(typeof window === 'undefined') {
-		const err = "sys: client guid should not be run on server"
-		console.error(err)
-		throw err
+	const time = performance.now()
+
+	// handle requests that have uuids only
+	if(!blob.uuid) {
+		return blob
 	}
-	const storage = window.localStorage
-	if(!storage) {
-		return "client-"+uuidv4()
+	let uuid = blob.uuid
+
+	// obliterate if desired; but still continue to pass the blob through other handlers
+	if(blob.obliterate) {
+		delete sys._uuids[uuid]
+		return blob
+	}
+
+	// find existing entity if any
+	let entity = sys._uuids[uuid]
+
+	// update volatile storage
+	if(!entity) {
+		blob._updated = blob._created = time
+		sys._uuids[uuid] = blob
 	} else {
-		let local = storage["orbital-local-uuid"]
-		if(!local) {
-			local = storage['orbital-local-uuid'] = uuidv4()
-		}
-		return local
+		blob._updated = time
+		append(blob,entity)
 	}
+
+	return blob
 }
 
-///
-/// generate a server guid - here we try to use the mac address to be durable and unique
-/// @todo probaby best to not use an async import and also not to rely on npm install node_modules
-///
+const query_matches = (args,candidate) => {
+	for (const [key,val] of Object.entries(args)) {
+		if(!candidate.hasOwnProperty(key)) return false
+		if(candidate[key] instanceof Object) continue
+		if(candidate[key]!==val) return false
+	}
+	return true
+}
 
-export const uuid_server = () => {
-	return new Promise( (resolve,reject) => {
-		import('node-machine-id').then(modules=>{
-			const id = "server-" + modules.default.machineIdSync({original:true})
-			resolve(id)
-		})
-		reject()
-	})
+const query = function(args,sys) {
+
+	if(args.uuid) {
+		return [ sys._uuids[args.uuid] ]
+	}
+
+	const results = []
+
+	for (const [uuid,entity] of Object.entries(sys._uuids)) {
+		if(!query_matches(args,entity)) continue
+		results.push(entity)
+	}
+
+	return results
+}
+
+export const uuid_observer = {
+	uuid,
+	description,
+	query,
+	resolve
 }

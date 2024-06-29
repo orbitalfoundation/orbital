@@ -1,5 +1,4 @@
 
-import { paper_ssr } from '../paper/paper-ssr.js'
 
 import * as fs from 'fs'
 import * as http from 'http'
@@ -195,51 +194,12 @@ async function http_handle_request(req, res) {
 			return
 		}
 
-		//
-		// ssr attempt - test
-		//
-		// pastes the ssr in first and then the live site after - this should be good enough for the client to figure things out ...
-		//
-		// this code fakes a client side request effectively; and then asks paper to produce an ssr version of itself
-		// this requires the request path to be sensible for server side resources ( see sys meta and sys side import maps )
-		//
-		// - needs to fetch the correct index.js - and this is currently only fetching the root one @todo
-		//
-		// - could flush the paper nodes after fetching them ... but it isn't strictly necessary to do so
-		//
-		// - we must not load things like volume-3js - this still needs thought @todo
-		//
-
-		let ssrdata = ""
-
-		if(false && sys && stats.resource.endsWith("index.html")) {
-			ssrdata = memoized[stats.resource]
-			if(!ssrdata) {
-				console.log("server: attempting fresh ssr on ",stats.resource,sys.meta.dirname)
-				try {
-					await sys.resolve({dependencies:["/index.js"]})
-					memoized[stats.resource] = ssrdata = paper_ssr(sys,"https://orbital.foundation/") || ""
-					// const candidates = sys.query({paper:true})
-					// candidates.forEach(c=>{ sys.resolve({uuid:c.uuid,obliterate:true}) })
-				} catch(err) {
-					console.error("server: ssr failed",err)
-				}
-			}
-		}
-
 		// write header
 		const mime = mimeTypes[stats.resource.split('.').pop()] || 'text/plain'
 
-		if(!ssrdata.length) {
 			res.writeHead(200, { 'Content-Type': mime, 'Content-Length': stats.size })
 			res.write(data,'binary')
 			res.end()
-		} else {
-			let out = ssrdata + data
-			res.writeHead(200, { 'Content-Type': mime, 'Content-Length': Buffer.byteLength(out,'utf8') })
-			res.write(out)
-			res.end()
-		}
 
 	})
 
@@ -250,133 +210,20 @@ export class Server {
 	http = null
 	io = null
 	sys = null
-	port = DEFAULT_PORT
 
-	constructor() {
-		this.http = http.createServer(http_handle_request).listen(this.port)
+	constructor(_sys) {
+		sys = this.sys = _sys
+		if(!sys || !sys.selfid) throw "Must have sys and sys.selfid"
+		const port = sys && sys.config && sys.config.network_port ? sys.config.network_port : DEFAULT_PORT
+		this.http = http.createServer(http_handle_request).listen(port)
 		this.io = new Socket.Server(this.http)
-		this.io.on('connection', this._fresh_connection.bind(this) )
+		this.io.on('connection', this.fresh_connection.bind(this) )
 	}
 
-	async _fresh_connection(socket) {
+	async server_network_react(args) {
 
-		console.log("server: fresh connection",socket.id)
-
-		if(!this.sys) {
-			warn('server: no sys')
-			return
-		}
-
-		socket.on('data', async (data) => {
-			await this._consume_incoming_data(socket,data)
-		})
-
-		socket.on('disconnect', ()=>{
-			this._disconnect_and_obliterate(socket)
-		})
-
-	}
-
-	async _consume_incoming_data(socket,data) {
-
-		if(!data || !data.network) return
-
-		if( !data ||
-			typeof data !== 'object' ||
-			Array.isArray(data) ||
-			!data.network ||
-			typeof data.network !== 'object' ||
-			Array.isArray(data.network))
-		{
-			error('server: data invalid',data)
-			return			
-		}
-
-		if(!data.network.socketid) {
-			error("server: data is not marked up with originator socket?",data,socket.id)
-			return
-		}
-
-		// mark as remote as a convenience concept
-		data.network.remote = true
-
-		// handle remote query right now and throw away packet
-		if(data.network.query) {
-			await this._query(socket,data.network)
-			return
-		}
-
-		// echo state to other parties in the subspace
-		const sockets = await this.io.fetchSockets()
-		for(const other of sockets) {
-			if(other.id === socket.id || other.subspace !== data.network.subspace) continue
-			await other.emit('data',data)
-		}
-
-		// wait for internal resolver to finalize ... not sure await really makes any difference @todo debate
-		await this.sys.resolve(data)
-	}
-
-	//
-	// publish a fresh copy of state
-	// @todo 
-	//
-	// 
-	// @todo this needs some work
-	//		- it must filter by the subspace - or at least the client must ask for the subspace by hand
-	//		- if we do get a subspace query for like a room or world - we should load that manifest first
-	//		- it's unclear what happens if a client disconnects and reconnects - we should blow away transient objects
-	//		- but if there are durable objects it arguably could send you a copy of your own avatar ... which is dumb... we need to mark where things came from and not send them back
-	//
-
-	async _query(socket,network={subspace:"/"}) {
-
-		if(!this.sys) {
-			warn('server: no sys')
-			return
-		}
-
-		console.log('server: websocket got a query request',socket.id)
-
-		const candidates = await this.sys.query({'network.subspace':network.subspace})
-
-		for(const entity of candidates) {
-			console.log("********* network server sending fresh whole entity",entity.uuid)
-			socket.emit('data',entity)
-		}
-	}
-
-	///
-	/// traffic has arrived from one of the clients - route it through local handlers and typically multicast
-	///
-
-	async server_network_react(blob,sys) {
-
-		// set sys if we see it
-		this.sys = sys
-
-		if(!blob || !blob.network) return
-
-		if( !blob ||
-			typeof blob !== 'object' ||
-			Array.isArray(blob) ||
-			!blob.network ||
-			typeof blob.network !== 'object' ||
-			Array.isArray(blob.network))
-		{
-			console.error('server: data network invalid',blob)
-			return
-		}
-
-		// get full entity if any
-		const entity = blob._entity
-
-		// if traffic was originally from network then do not forward it
-		// @todo actually this is not a terrible place to echo network traffic but lets not do it for now
-		if(blob.network_remote || (blob._entity && blob._entity.network_remote )) {
-			//console.log("server: rejecting sending",args)
-			return
-		}
+		// just avoid this
+		if(args.blob.name === "tick") return
 
 		// the goal of this reactor is to forward locally manufactured traffic to network
 		// @todo later it could deal with any state that appears on the network - including remote state
@@ -385,12 +232,12 @@ export class Server {
 		// at the moment all traffic is always entities with effects, so we look at the entity for some hints on what to do
 
 		// this should be checked by the query; but paranoia check it here again to avoid loopback
-		if(!entity || !entity.network || entity.network_remote) {
+		if(!args || !args.entity || !args.entity.network || args.entity.network_remote) {
 			//console.log("server: rejecting sending",args)
 			return
 		}
 
-		if(entity.networkid && entity.networkid !== sys.selfid) {
+		if(args.entity.networkid && args.entity.networkid !== this.sys.selfid) {
 			//console.log("server: rejecting sending 2",args)
 			// console.error("server: asked to publish something it does not own",args)
 			// it is actually possible for this to occur - traffic is not fully filtered by the time it gets here
@@ -398,25 +245,19 @@ export class Server {
 		}
 
 		// take ownership
-		//entity.networkid = sys.selfid
+		args.entity.networkid = this.sys.selfid
 
 		// always mark the traffic source
-		//blob.networkid = sys.selfid
+		args.blob.networkid = this.sys.selfid
 
 		const sockets = await this.io.fetchSockets()
 		for(let socket of sockets) {
-			socket.emit('data',blob)
+			socket.emit('data',args.blob)
 		}
 
 	}
 
-	async _disconnect_and_obliterate(socket) {
-
-		if(!this.sys) {
-			warn('server: no sys')
-			return
-		}
-
+	async disconnect_and_obliterate(socket) {
 		console.log("server: server disconnect ",socket)
 
 		// @todo add a heartbeat system? clients can delete on loss of heartbeat
@@ -426,7 +267,7 @@ export class Server {
 		// mark some entities as 'obliterated' - which observers can listen to and remove their records
 
 		const candidates = await this.sys.query({})
-		for(let entity of candidates) {
+		for(const entity of candidates) {
 			if(entity.uuid && entity.network && entity.networkid && entity.networkid === socket.id && !entity.persist) {
 
 				const data = {
@@ -453,7 +294,85 @@ export class Server {
 		}
 	}
 
+	async fresh_connection(socket) {
 
+		console.log("server: fresh connection",socket.id)
+
+		// start watching disconnect
+		socket.on('disconnect', ()=>{ this.disconnect_and_obliterate(socket) } )
+
+		// start watching fresh data
+		socket.on('data', (data) => {
+			this.consume_incoming_data(socket,data)
+		})
+
+		// for now send initial state right away - @todo the client should actually proactively ask for this
+		await this.send_fresh_data(socket)
+	}
+
+	async send_fresh_data(socket) {
+
+		console.log("server: websocket got a query request - sending all db items for now - @todo refine",socket.id)
+
+		// publish a fresh copy of all state to that client - sending also remote entities that happen to exist already
+
+		// @todo this needs some work
+		//		- it must filter by the subspace - or at least the client must ask for the subspace by hand
+		//		- if we do get a subspace query for like a room or world - we should load that manifest first
+		//		- it's unclear what happens if a client disconnects and reconnects - we should blow away transient objects
+		//		- but if there are durable objects it arguably could send you a copy of your own avatar ... which is dumb... we need to mark where things came from and not send them back
+
+		const candidates = await this.sys.query({})
+
+		for(const entity of candidates) {
+			if(entity.network) {
+				if(!entity.networkid) {
+					console.warn("server: had to grant networkid",entity.uuid)
+					entity.networkid = this.sys.selfid
+				}
+				if(entity.networkid !== socket.id) {
+					console.log("********* network server sending fresh whole",entity.uuid)
+					socket.emit('data',entity)
+				}
+			}
+		}
+	}
+
+	async consume_incoming_data(socket,data) {
+
+		// perform incoming state here (the sys component doesn't run as many observers as the client typically)
+		// echo to all other observers for now; later can improve
+		// also this entire function could be an observer on sys rather than here at all
+
+		if(data.networkid && data.networkid != socket.id) {
+			warn("server: got traffic that is not from where it claims to come from",data,socket.id)
+		}
+
+		// mark with source
+		data.networkid = socket.id
+
+		// mark as not ours - this idea may go away
+		data.network_remote = true
+
+		// the server can react to some events - preventing them from going further
+		if(data.server_query) {
+			await this.send_fresh_data(socket)
+			return
+		}
+
+		// generally speaking the server echoes state to all other parties
+		const sockets = await this.io.fetchSockets()
+		for(let other of sockets) {
+			if(other.id == socket.id || data.networkid == other.id) continue
+			other.emit('data',data)
+		}
+
+		// async deal with it here as well - effectively acts as just one more listener and is asynchronous ... @todo debate
+		this.sys.resolve(data)
+	}
 
 }
+
+new Server({selfid: "asdf"})
+
 

@@ -1,15 +1,16 @@
 
 //
 // network helper / wrapper - must be used when starting networking
+// @todo these modules are imported once so checking is not needed
 //
 
-async function observer(args) {
+async function resolve(blob,sys) {
 
-	if(!this.network_established) {
-		this.network_established = true
-		if(args.sys.server) {
+	if(!this._network_established) {
+		this._network_established = true
+		if(sys.isServer) {
 			const modules = await import("./server.mjs")
-			this.server = new modules.Server(args.sys)
+			this.server = new modules.Server(sys)
 			this.reactor = this.server.server_network_react.bind(this.server)
 		} else {
 			const modules = await import("./client.mjs")
@@ -18,13 +19,14 @@ async function observer(args) {
 	}
 
 	if(this.reactor) {
-		this.reactor(args)
+		this.reactor(blob,sys)
 	}
 
+	return blob
 }
 
 export const network_component_observer = {
 	about:'network observer',
-	observer
+	resolve,
 }
 

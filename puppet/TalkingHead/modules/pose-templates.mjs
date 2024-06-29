@@ -201,7 +201,5 @@ Object.keys( poseDelta.props ).forEach( x => {
   names.add(x)
 });
 
-console.log(names)
-
 export const posePropNames = [...names];
 

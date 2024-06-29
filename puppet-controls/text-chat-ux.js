@@ -14,15 +14,15 @@ const text_chat_uuid = '@orbital/puppet/text-chat-ux'
 export const text_observer = {
 	about: 'text observer',
 
-	observer: (args) => {
-		if(isServer) return
-		if(args.blob.tick) return
-		if(!args.blob.conversation) return
+	resolve: (blob) => {
+		if(isServer) return blob
+		if(blob.tick) return blob
+		if(!blob.conversation) return blob
 
 		const target = document.getElementById(text_chat_uuid)
 		if(!target) {
 			console.log("text observer: weird no target")
-			return
+			return blob
 		}
 
 		// @todo 'paper' should be reactive ideally
@@ -32,10 +32,11 @@ export const text_observer = {
 
 		// hack around the lack of reactivity of 'paper'
 		const elem = document.createElement('div')
-		elem.innerHTML=args.blob.conversation.text
+		elem.innerHTML=blob.conversation.text
 		const history = target.children[0]
 		history.appendChild(elem)
 		if(history.children.length>4) history.removeChild(history.firstChild)
+		return blob
 	}
 }
 
@@ -45,7 +46,7 @@ function onchange(event,parent,sys) {
 	const value = event.target.value
 	event.target.value = ''
 
-	const speakers = sys.query({uuid:sys.selfid})
+	const speakers = sys.query({navigation:true})
 
 	if(!speakers || !speakers.length || !speakers[0].volume || !speakers[0].volume.transform || !speakers[0].volume.transform.xyz) {
 		console.error("text chat: bad speaker?",speakers)
@@ -81,12 +82,12 @@ export const puppet_text_chat_ux = {
 			{
 				css: 'position:absolute;bottom:0px;right:0px;font-size:1.9em;font-size:2em;',
 				content:`💬`,
-				onclick: (args)=>{
+				onclick: (args,paper,sys)=>{
 					const a = args.target.parentNode.children[0].style
 					const b = args.target.parentNode.children[1].style
 					const state = a.display == 'block'
 					a.display = b.display = state ? 'none' : 'block'
-					globalThis.sys.resolve({voice_recognizer:!state})
+					sys.resolve({voice_recognizer:!state})
 				}
 			}
 		]

@@ -2,7 +2,7 @@
   "name": "orbital",
   "homepage": "https://github.com/orbitalfoundation",
   "type": "module",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "scripts": {
     "dev": "cd ..; node orbita/server-standalone.mjs",
     "test": "node tests/test.mjs"

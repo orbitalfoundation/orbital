@@ -24,7 +24,9 @@ const isServer = (typeof window === 'undefined') ? true : false
 
 export async function client_network_react(args) {
 
-	if(args.blob.name === "tick") return
+	const blob = args
+
+	if(!blob.network) return
 
 	if(isServer) {
 		console.error("network: this cannot run on server side",args)
