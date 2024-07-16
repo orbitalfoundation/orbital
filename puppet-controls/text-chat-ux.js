@@ -59,7 +59,6 @@ function onchange(event,parent,sys) {
 			sponsor:speakers[0].uuid,
 			xyz:speakers[0].volume.transform.xyz,
 			text:value,
-			network:true
 		}
 	})
 }

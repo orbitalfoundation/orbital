@@ -48,7 +48,8 @@ function navigate(event,entity,sys) {
 		uuid: entity.uuid,
 		volume: {
 			transform: { xyz, ypr }
-		}
+		},
+		network:{}
 	})
 
 }

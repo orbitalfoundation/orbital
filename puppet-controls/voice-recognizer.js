@@ -6,7 +6,8 @@ function helper(sys,text) {
 
 	console.log("voice recognizer caught text = ",text)
 
-	const speakers = sys.query({uuid:sys.selfid})
+//	const speakers = sys.query({uuid:sys.selfid})
+	const speakers = sys.query({navigation:true})
 
 	if(!speakers || !speakers.length || !speakers[0].volume || !speakers[0].volume.transform || !speakers[0].volume.transform.xyz) {
 		console.error("voice chat: bad speaker?",speakers)
@@ -42,9 +43,11 @@ const voice_recognizer = (sys,allowed = true ) => {
 			recognition.continuous = true
 			recognition.interimResults = true
 			recognition.onresult = function(event) {
+				console.log(event)
 				for (var i = event.resultIndex; i < event.results.length; ++i) {
 					const text = event.results[i][0].transcript
 					if (event.results[i].isFinal) {
+						console.log("voice_recognizer final",text)
 						helper(sys,text)
 					} else {
 						//console.log('chat widget: speech to text interim: ' + transcript);
@@ -67,24 +70,25 @@ let voice_allowed = 0
 
 export const voice_recognizer_observer = {
 	about: 'puppet tick busy observer - client side',
-	observer: (args) => {
-		if(isServer) return
+	resolve: (blob,sys) => {
+		if(isServer) return blob
 
-		if(args.blob.hasOwnProperty('voice_recognizer')) {
-			voice_enabled = args.blob.voice_recognizer ? 1 : 0
-			voice_recognizer(args.sys,voice_allowed & voice_enabled ? true : false)
-			return
+		if(blob.hasOwnProperty('voice_recognizer')) {
+			voice_enabled = blob.voice_recognizer ? 1 : 0
+			voice_recognizer(sys,voice_allowed & voice_enabled ? true : false)
+			return blob
 		}
 
-		if(!args.blob.tick) return
+		if(!blob.tick) return blob
 
 		// for now we are manually checking the puppets - since they make the sounds so far
 		// @todo later we really want a more generic system like some audio timing event registry
 
-		const entities = args.sys.query({puppet:true})
+		const entities = sys.query({puppet:true})
 		voice_allowed = 1
 		entities.forEach( (entity) => { if(entity.puppet.busy) voice_allowed = 0 })
-		voice_recognizer(args.sys,voice_allowed & voice_enabled ? true : false)
+		voice_recognizer(sys,voice_allowed & voice_enabled ? true : false)
+		return blob
 	}
 }
 

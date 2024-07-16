@@ -59,6 +59,7 @@ const resolve = async (blob,sys) => {
 
 const query = (args,sys) => {
 	// find any query handler and return it for now - refine later into a concept of handlers that choose to handle or choose to not handle @todo
+	// skip ourselves
 	for(let i = 1; args && i < sys._observers.length;i++) {
 		const observer = sys._observers[i]
 		if(observer.query) {

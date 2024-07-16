@@ -38,10 +38,12 @@ Useful links on these topics:
 `
 
 const resolve = async function(blob,sys) {
+	// resolve can await
 	return this._observers[0].resolve(blob,this)
 }
 
 const query = function(args,sys) {
+	// volatile no await
 	return this._observers[0].query(args,this)
 }
 

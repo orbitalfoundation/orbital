@@ -1,118 +1,56 @@
-
 import { log,warn,error } from '../utils/log.js'
-
-const isServer = (typeof window === 'undefined') ? true : false
-
-const cwd = (typeof process === 'undefined') ? "" : process.cwd() // relative cwd ../../ cannot be used on server due to path aliasing
 
 const uuid = "orbital/sys/load.js"
 
-const description = `The load observer fetches assets for Orbital`
+const description = `Load component loads other assets on demand`
 
-const importmaps = {
-	'orbital': 'orbital'
+const _load_configuration = {
+	manifest:'index.js',
+	importmaps: {
+		'orbital':'orbital',
+		'@':''
+	},
+	anchor:null
 }
-
-const _configuration = {
-	importmaps,
-	isServer,
-	manifest:'index.js'
-}
-
-//
-// fetch() is used to load files on client and server; harmonize this behavior for client and server
-//
-// callers should typically anchor their requests such as "/something" or be relative to root such as "./something"
-//
-//  https://blah is allowed as is
-//  my/example/path is allowed as is although may not fetch() since webpack is not used nor npm resolution
-//  mypath/ is turned into mypath/index.js
-//  /mypath/myfile is turned into process.cwd()/mypath/myfile on server and /mypath/myfile on client
-//  orbital/somefile is turned into process.cwd()/orbital/somefile on server and /orbital/somefile on client
-//  ../../../etc/passwd cannot be reached ... although it is not our job to provide this security
-//
-
-export const _harmonize_resource_path = (resource,config=_configuration) => {
-
-	if (!resource || typeof resource !== 'string' && !(resource instanceof String)) {
-		error(uuid,'sys:load invalid resource',resource)
-		return null
-	}
-
-	let extern = resource.toLowerCase()
-	if( extern.startsWith('http://') || extern.startsWith('https://') || extern.startsWith('file://') ) {
-		return resource
-	}
-
-	const parts = resource.split("/")
-
-	const out = []
-	for(let i = 0; i < parts.length; i++) {
-		let part = parts[i]
-		switch(part) {
-			case '':
-				if(i == 0) {
-					if(config.isServer) out.push(cwd); else out.push('')
-				}
-				if(i == parts.length-1) {
-					out.push(config.manifest)
-				}
-				break
-			case '..':
-				out.pop()
-				break
-			default:
-				if(!i) {
-					// @todo illegal paths such as /etc/passwd could sneak in via import maps
-					if(config.importmaps[part]) {
-						if(config.isServer) out.push(cwd)
-						part = config.importmaps[part]
-					}
-				}
-				out.push(part)
-				break
-		}
-	}
-	return out.length ? out.join('/')  : null
-}
-
-//
-// import resources for client or server
-//
-// @todo note
-// was toying with an idea of granting uuids here as a convenience @todo revisit
-// if(typeof v === 'object' && !Array.isArray(v) && v !== null && !v.uuid) {
-//	const uuid = resource + "/" + k
-//	console.warn('sys: note blob had no uuid key=',k,'value=',v)
-//	v.uuid = uuid
-// }
-//
-
-const load = async (resource,sys) => {
-	try {
-		const module = await import(resource)
-		for(const [k,v] of Object.entries(module)) {
-			//console.log(`sys:load - loading module named ${k} from ${resource}`)
-			try {
-				await sys.resolve(v)
-			} catch(e) {
-				console.error("sys:load - error corrupt artifact?",k,e)
-			}
-		}
-	} catch(err) {
-		console.error("sys:load - error unable to load",err)
-		console.error(err)
-	}
-}
-
 
 const resolve = async function(blob,sys) {
 	if(!blob.load) return blob
+
+	//
+	// a persistent anchor concept is used to ground subsequent loads
+	// @todo this may need some push/pop style scoping such as when loading manifests from some other projects
+	//
+
+	if(blob.anchor && blob.anchor.length) {
+		let temp = blob.anchor
+		if(temp.startsWith('/')) temp = temp.slice(1)
+		if(temp.endsWith('/')) temp = temp.slice(0,-1)
+		_load_configuration.anchor = temp.length ? temp : null
+	}
+
+	//
+	// load requested files
+	//
+
 	const candidates = Array.isArray(blob.load) ? blob.load : [blob.load]
 	for(let resource of candidates) {
-		resource = _harmonize_resource_path(resource,this._configuration)
-		if(resource) await load(resource,sys)
+		resource = harmonize_resource_path(this._load_configuration,resource)
+		try {
+			const module = await import(resource)
+			for(const [k,v] of Object.entries(module)) {
+				try {
+					await sys.resolve(v)
+				} catch(e) {
+					error(uuid,' - error corrupt artifact key=',k,'content=',v,'error=',e)
+				}
+			}
+		} catch(err) {
+			error(uuid,'- error unable to load',err)
+		}
 	}
+
+	// done
+
 	return blob
 }
 
@@ -120,6 +58,73 @@ export const load_observer = {
 	uuid,
 	description,
 	resolve,
-	_configuration
+	_load_configuration
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+const isServer = (typeof window === 'undefined') ? true : false
+
+// note that relative cwd ../../ cannot be used on server due to path aliasing - it has to be a full blown process.cwd()
+const cwd = (typeof process === 'undefined') ? "" : process.cwd()
+
+export const harmonize_resource_path = (config,resource) => {
+
+	// valid?
+	if (!resource || typeof resource !== 'string' && !(resource instanceof String) || !resource.length) {
+		error(uuid,'- invalid resource',anchor,resource,resource)
+		return null
+	}
+
+	// external?
+	const lower = resource.toLowerCase()
+	if( lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('file://') ) {
+		log(uuid,'- external resource',resource)
+		return resource
+	}
+
+	// pick apart and rebuild the path
+	let out = []
+	const parts = resource.split("/")
+	for(let i = 0; i < parts.length; i++) {
+		let part = parts[i]
+		switch(part) {
+			case '.':
+				// @todo dunno what to do ...
+				break
+			case '..':
+				// perform the .. right now - to prevent escaping the path space on client and server
+				out.pop()
+				break
+			case '':
+				if(i == parts.length-1) {
+					// on both server and client if the file ends in '/' then force inject a default manifest typically '/index.js'
+					out.push(config.manifest)
+				}
+				break
+			default:
+				if(!i) {
+					// anchor paths that do not start with '/'
+					if(config.anchor) {
+						out.push(config.anchor)
+					}
+					// may rewrite token or throw it away
+					if(config.importmaps.hasOwnProperty(part)) {
+						part = config.importmaps[part]
+					}
+				}
+				if(part.length) {
+					out.push(part)
+				}
+				break
+		}
+	}
+
+	// resources are located within their relative application filespace on server and client
+	out.unshift( isServer ? cwd : '')
+
+	// put all back together and return
+	return out.length ? out.join('/')  : null
+}
+
 

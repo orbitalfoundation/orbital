@@ -1,25 +1,10 @@
 
-// this file cannot be loaded or run on the server at all...
-
-/*
-
-// it would be nice if javascript exposed importmaps programmatically; but it appears to not do so @todo
-
-const importMap = {
-	"imports": {
-		"three": "./libs/three/three.module.js",
-		"three/addons/": "./libs/three/jsm/"
-	}
-}
-const im = document.createElement('script')
-im.type = 'importmap'
-im.textContent = JSON.stringify(importMap)
-document.head.append(im)
-*/
-
-
-//import { MeshOptDecoder } from '@meshoptdecoder' 
-//<script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.20.0/meshopt_decoder.js"></script>
+//
+// must bring in meshoptdecoder by injection for now - @todo improve
+//
+// import { MeshOptDecoder } from '@meshoptdecoder' 
+// <script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.20.0/meshopt_decoder.js"></script>
+//
 
 if(typeof document !== 'undefined') {
 	const im = document.createElement('script')
@@ -27,30 +12,25 @@ if(typeof document !== 'undefined') {
 	document.head.append(im)
 }
 
-import * as THREE from './libs/three/three.module.js';
-import { GLTFLoader } from './libs/three/addons/loaders/GLTFLoader.js';
-import { KTX2Loader } from './libs/three/addons/loaders/KTX2Loader.js'
-import { DRACOLoader } from './libs/three/addons/loaders/DRACOLoader.js'
-import { FBXLoader } from './libs/three/addons/loaders/FBXLoader.js';
-import { OrbitControls } from './libs/three/addons/controls/OrbitControls.js'
-import { RoomEnvironment } from './libs/three/addons/environments/RoomEnvironment.js'
+//
+// note regarding use of import maps:
+//
+// we rely on hardcoded importmaps for 'three' because we also pull in third party libraries that rely on this and that we cannot change
+// there's a very poorly designed 'feature' in javascript that importmaps cannot be ammended at runtime after javascript modules load
+//
 
-import { VRMLoaderPlugin, VRMUtils, VRM, VRMHumanoid } from './three-vrm.module.js'
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { VRM, VRMUtils, VRMHumanoid, VRMLoaderPlugin } from './three-vrm.module.js'
 
-// import { VRM, VRM1Meta, VRMHumanBone, VRMHumanoid } from '@pixiv/three-vrm'
-
-
-/* @todo try inject three into an import map
-import * as THREE from './libs/three/three.module.js'
-import { GLTFLoader } from './libs/three/jsm/loaders/GLTFLoader.js'
-import { KTX2Loader } from './libs/three/jsm/loaders/KTX2Loader.js'
-import { DRACOLoader } from './libs/three/jsm/loaders/DRACOLoader.js'
-import { OrbitControls } from './libs/three/jsm/controls/OrbitControls.js'
-import { RoomEnvironment } from './libs/three/jsm/environments/RoomEnvironment.js'
-
-*/
-
-///////////////////////////////////////////////////////////////////////////////////////////////
+//
+// GLTF Loader helpers
+//
 
 const loader = new GLTFLoader()
 
@@ -75,17 +55,48 @@ if(typeof MeshoptDecoder !== 'undefined') {
 
 loader.register((parser) => { return new VRMLoaderPlugin(parser) })
 
-///////////////////////////////////////////////////////////////////////////////////////////////
+
+///
+/// A volume represents a 3d scene with objects - there can be more than one on a given web page - a default is used if none specified
+///
 
 class VolumeManager {
 
 	uuid = 0
 	entities = {}
 
+	//
+	// path and resource discovery helper
+	//
+	// there is a problem with knowing where assets are - manifests can be anywhere - and the entire app can be in a subfolder
+	// for now i let the caller specify a @/ to indicate that they want the root of the app space
+	// that root should always be about 3 folders up from this file - because orbital is typically included as a child per app
+	// sys also may store a map of where the current local application actually is anchored and we may want to use that @todo
+	//
+
+	fixup_path(path) {
+		if(path.startsWith('@/')) {
+			let parts = new URL(import.meta.url).pathname.split('/')
+			parts.pop()
+			parts.pop()
+			parts.pop()
+			let more = path.split('/'); more.shift()
+			parts = [ ...parts, ...more ]
+			path = parts.join('/')
+		}
+
+		return path
+	}
+
+	///
+	/// init 3js scene
+	///
+
 	constructor (parentDiv,opt = {}) {
 
-		//////////////////////////////////////////////////////////////////////////////////
-		// merge user options overtop defaults
+		//
+		// merge options if any
+		//
 
 		this.opt = {
 			cameraView: 'full',
@@ -102,8 +113,9 @@ class VolumeManager {
 
 		this.parentDiv = parentDiv
 
-		//////////////////////////////////////////////////////////////////////////////////
-		// sdtart renderer
+		//
+		// start renderer
+		//
 
 		const renderer = this.renderer = new THREE.WebGLRenderer({
 			antialias: true,
@@ -112,7 +124,6 @@ class VolumeManager {
 		})
 		renderer.autoClearColor = false
 		renderer.setClearColor(0xffffff, 0);
-
 		renderer.setSize(parentDiv.clientWidth, parentDiv.clientHeight)
 		renderer.setPixelRatio(window.devicePixelRatio)
 		if(false) {
@@ -125,8 +136,9 @@ class VolumeManager {
 		parentDiv.append(renderer.domElement)
 		new ResizeObserver(this._resize.bind(this)).observe(this.parentDiv)
 
-		//////////////////////////////////////////////////////////////////////////////////
-		// create a default scene with a default camera and controls
+		//
+		// create a default scene with a default camera and default controls for now
+		//
 
 		const scene = this.scene = new THREE.Scene();
 		scene.background = new THREE.Color(0xffffff);
@@ -142,7 +154,7 @@ class VolumeManager {
 		const near = 0.01
 		const far = 100
 		const camera = this.camera = new THREE.PerspectiveCamera(fov, aspect, near, far)
-		//scene.add(camera)
+		//scene.add(camera) <- not needed
 		scene.camera = camera
 		scene.parentDiv = parentDiv
 
@@ -157,66 +169,63 @@ class VolumeManager {
 			this.controls.autoRotate = false
 		}
 
-		this._cameraRetarget()
+		this._camera_retarget()
 
+		//
+		// create a default light so we can see what is going on - can remove later if one shows up from data driven sources
+		//
+
+		const light = this.light = new THREE.DirectionalLight( 0xffffff, Math.PI );
+		light.position.set( 1.0, 1.0, -1.0 ).normalize();
+		scene.add( light );
+
+		//
 		// helpers
+		//
+
 		//const gridHelper = new THREE.GridHelper( 10, 10 );
 		//scene.add( gridHelper );
 
 		//const axesHelper = new THREE.AxesHelper( 5 );
 		//scene.add( axesHelper );
 
-
-		///////////////////////////////////////////////////////////////////////
-		// create default light - remove if one shows up
-
-		// light
-		const light = this.light = new THREE.DirectionalLight( 0xffffff, Math.PI );
-		light.position.set( 1.0, 1.0, -1.0 ).normalize();
-		scene.add( light );
-
-		//////////////////////////////////////////////////////////////////////////////////
-		// a debugging cube
-
-		if(false) {
-			let s = 0.5
-			const geometry = new THREE.BoxGeometry(s,s,s)
-			const material = new THREE.MeshBasicMaterial({color: 0x00ff0000, wireframe: true })
-			this.cube = new THREE.Mesh(geometry, material)
-			scene.add(this.cube)
-			renderer.render(scene, camera)
-		}
 	}
 
-	update(time=0,delta=0) {
+	///
+	/// advance all 3d ojects managed here over time
+	///
+
+	step(time=0,delta=0) {
 
 		Object.values(this.entities).forEach(entity=> {
-			// later do all prop updates not just animation @todo
-			this._change_animation(entity.volume,time,delta)
-
-			if(entity.volume._mixer) {
-	            entity.volume._mixer.update(delta/1000);
-	        }
-
+			this._animation_update(entity.volume,time,delta)
 		})
 
 		if (this.controls) {
-			this._cameraHide()
+			this._camera_hide_near_target()
 			this.controls.update()
-		}
-
-		if(this.cube) {
-			let SPEED = 0.01
-			this.cube.position.y = 1
-			this.cube.rotation.x -= SPEED * 2
-			this.cube.rotation.y -= SPEED
-			this.cube.rotation.z -= SPEED * 3
 		}
 
 		this.renderer.render( this.scene, this.camera )
 	}
 
-	_cameraRetarget(node=null) {
+	//
+	// deal witih browser window resizing
+	//
+
+	_resize() {
+		this.camera.aspect = this.parentDiv.clientWidth / this.parentDiv.clientHeight
+		this.camera.updateProjectionMatrix()
+		this.renderer.setSize( this.parentDiv.clientWidth, this.parentDiv.clientHeight )
+		if(this.controls)this.controls.update()
+		this.renderer.render( this.scene, this.camera )
+	}
+
+	//
+	// work around some issues with wanting orbit and nav at the same time - improve later
+	//
+
+	_camera_retarget(node=null) {
 
 		const camera = this.camera
 
@@ -256,62 +265,114 @@ class VolumeManager {
 		this.latchNode = node
 	}
 
-	_cameraHide() {
+	//
+	// hide the main player if the camera is close to them
+	//
+
+	_camera_hide_near_target() {
 		if(!this.latchNode) return
 		const camera = this.camera
 		let distance = camera.position.distanceTo( camera.target )
 		this.latchNode.visible = distance < 2 ? false : true
 	}
 
-	_resize() {
-		this.camera.aspect = this.parentDiv.clientWidth / this.parentDiv.clientHeight
-		this.camera.updateProjectionMatrix()
-		this.renderer.setSize( this.parentDiv.clientWidth, this.parentDiv.clientHeight )
-		if(this.controls)this.controls.update()
-		this.renderer.render( this.scene, this.camera )
+	//
+	// as a side task load animations one at a time that are requested and then latch as complete using volume._clips
+	// @todo later detect changes
+	//
+
+	async _animations_lazy_load(volume) {
+		const clips = {}
+		for(let filename of volume.animations) {
+			try {
+				if(filename.endsWith(".json")) {
+					const response = await fetch(this.fixup_path(filename))
+					const json = await response.json()
+					json.forEach((animation) => {
+						if (animation.tracks.length <= 0) {
+							console.error("volume-3js: animation track empty",filename,animation)
+						} else {
+							let clip = THREE.AnimationClip.parse(animation)
+							clips[clip.name] = clip
+							console.log("volume-3js: registered json animation named:",clip.name)
+						}
+					})
+				} else if(filename.endsWith(".glb") || filename.endsWith(".gltf")) {
+					let gltf = await loader.loadAsync( this.fixup_path(filename) )
+					for(let clip of gltf.animations) {
+						clips[clip.name] = clip
+						console.log("volume-3js: registered animation named:",clip.name)
+					}
+				} else {
+					console.error("volume-3js: unsure how to load animation named",filename)
+				}
+			} catch(err) {
+				console.error("volume-3js: cannot load animation file",this.fixup_path(filename),err)
+				continue
+			}
+		}
+		volume._clips = clips
 	}
 
-	_change_animation(volume,time,delta) {
+	//
+	// update anims every frame if any
+	//
 
-		// sanity check
-		if(!volume.animations || !volume._node || !volume._clips || !volume._mixer) return
+	_animation_update(volume,time,delta) {
 
-		// change animation?
-		if(volume.animation && volume.animation != volume._animation_previous) {
-			volume._animation_previous = volume.animation
+		if(!volume._node || !volume._clips) return
 
-			if(volume._animation_clip) {
-				volume._mixer.clipAction(this._animation_clip).fadeOut(0.5)
-			}
+		if(volume._mixer) {
+            volume._mixer.update(delta/1000);
+        }
 
-			volume._animation_clip = null
+		if(volume.animation == volume._animation_previous) return
 
-			if(volume.animation) {
-				Object.entries(volume._clips).forEach( ([k,v])=>{
-					if(k.includes(volume.animation)) {
-						volume._animation_clip = v
-						//console.log("volume - found animation to play now",v)
-					}
-				})
-			}
-
-			if(volume._animation_clip) {
-				volume._mixer.clipAction(volume._animation_clip).reset().fadeIn(0.5).setLoop(THREE.LoopPingPong,20).play()
-		    }
+		// force mixer up
+		if(!volume._mixer) {
+			volume._mixer = new THREE.AnimationMixer(volume._node)
 		}
 
+		// fade out previous
+		if(volume._animation_clip) {
+			volume._mixer.clipAction(this._animation_clip).fadeOut(0.5)
+			volume._animation_clip = null
+		}
+
+		// done?
+		if(!volume.animation || !volume.animation.length) {
+			volume._animation_previous = volume.animation
+			return
+		}
+
+		// apply new found
+		Object.entries(volume._clips).forEach( ([k,v])=>{
+			if(k.includes(volume.animation)) {
+				volume._animation_clip = v
+			}
+		})
+
+		if(volume._animation_clip) {
+			// looponce, looppingpong, looprepeat -> could expose these
+			volume._mixer.clipAction(volume._animation_clip).reset().fadeIn(0.5).setLoop(THREE.LoopRepeat,10).play()
+			volume._animation_previous = volume.animation
+	    }
+
 	}
 
-	async _update_miscellaneous(volume) {
+	//
+	// observe changes to volume geometry state and make sure the display reflects those changes
+	//
 
-		//////////////////////////////////////////////////////////////////////////////////////
+	async _update_geometry(volume) {
 
 		if(volume.light && !volume._node) {
-			// @todo improve - copy from babylon
+			// @todo improve - this is just set once and clearly should be more reactive
 			volume._node = this.light
 		}
 
 		else if(volume.camera && !volume._node) {
+			// @todo improve - this is just set once and clearly should be more reactive
 			volume._node = this.camera
 		}
 
@@ -319,113 +380,85 @@ class VolumeManager {
 		// @todo this runs once only for now improve later
 		// @todo detect dynamic changes to this string later and delete previous; this is just a quick hack to get some art assets loaded up for now
 
-		else if(volume.geometry && !volume._node && !volume._node_tried_load &&
-			(volume.geometry.endsWith(".glb") || volume.geometry.endsWith(".gltf") || volume.geometry.endsWith(".vrm") )
-		)
-		{
-			let currentVrm = null;
-
+		else if( volume.geometry &&
+				!volume._node &&
+				!volume._node_tried_load &&
+				(volume.geometry.endsWith(".glb") || volume.geometry.endsWith(".gltf") || volume.geometry.endsWith(".vrm") )
+		) {
 			volume._node_tried_load = true
 
-			let gltf = await loader.loadAsync( "/" + volume.geometry )
+			const path = this.fixup_path(volume.geometry)
+
+			console.log("volume-3js: loading",volume.geometry,path)
+
+			const gltf = await loader.loadAsync( path )
 
 			if(!gltf || !gltf.scene) {
-				console.error("volume: cannot load",volume.geometry)
-			} else {
-				//console.log("volume: has loaded something",volume.geometry,gltf)
+				console.error("volume-3js: cannot load",volume.geometry)
+				return
+			}
 
-				// don't cull these
-				gltf.scene.traverse((child) => { if ( child.type == 'SkinnedMesh' ) {  child.frustumCulled = false; } })
+			// specifically force these not to be culled
+			gltf.scene.traverse((child) => { if ( child.type == 'SkinnedMesh' ) {  child.frustumCulled = false; } })
 
-				// for now stuff the gltf directly into the volume
-				volume._gltf = gltf
+			// remember the gltf here for now
+			volume._gltf = gltf
 
-				// stuff the node into the volume and track it
-				volume._node = gltf.scene
+			// remember the node here for now
+			volume._node = gltf.scene
 
-				// also track camera
-				volume._camera = this.camera
+			// also advise the volume about the camera - this may need rethinking @todo
+			volume._camera = this.camera
 
-				// deal with vrm or normal
-				if(gltf.userData && gltf.userData.vrm) {
+			// we have to distinguish between ordinary gltfs and vrms
+			if(!gltf.userData || !gltf.userData.vrm) {
+				this.scene.add(gltf.scene)
 
-					// vrm models are rotated? correct this
-					let vrm = gltf.userData.vrm
-
-					// this is needed for vrm 0.0 rigs only - disabled for now
-					if(true) {
-						const bones = vrm.humanoid.rawHumanBones
-						vrm.humanoid.normalizedHumanBonesRoot.removeFromParent()
-						bones.hips.node.rotateY(Math.PI)
-						vrm.humanoid = new VRMHumanoid(bones)
-						vrm.update(100)
-					}
-
-					volume._vrm = gltf.scene._vrm = gltf._vrm = gltf.userData.vrm = vrm
-
-					//console.log("volume-3js: loaded vrm",vrm)
-					// calling these functions greatly improves the performance (but collides with optimizers)
-					//VRMUtils.removeUnnecessaryVertices( gltf.scene );
-					//VRMUtils.removeUnnecessaryJoints( gltf.scene );
-
-
-					vrm.scene.traverse( ( obj ) => { obj.frustumCulled = false })
-					this.scene.add(vrm.scene)
-				} else {
-					//console.log("volume-3js: loaded normal glb")
-					this.scene.add(gltf.scene)
+				// keep track of any animations for later
+				if(gltf.animations) {
+					gltf.scene.animations = gltf.animations
 				}
 
-				// animate
-				volume.loop = 1
-				if(volume.loop && gltf.animations[0]) {
-		            volume._mixer = new THREE.AnimationMixer(gltf.scene);
-		            volume._action = volume._mixer.clipAction(gltf.animations[0]);
-		            volume._action.play();
-		        }
-			}
-		}
-
-		//////////////////////////////////////////////////////////////////////////////////////
-
-		// load animations - once only for now
-		// @todo allow invocation more than once if animation sets change
-		// @todo for now take just the first clip from each anim improve later
-		// @todo right now we are tied to the ready player me avatars
-		// @todo this avatar animation loading feature could actually move to puppet possibly
-
-		if(volume.animations && !volume._clips && volume._node) {
-			volume._clips = {}
-			for(let filename of volume.animations) {
-				try {
-					const response = await fetch(filename)
-					const json = await response.json()
-					let clip = null
-					json.forEach((animation) => {
-						if (animation.tracks.length <= 0) return
-						clip = THREE.AnimationClip.parse(animation)
-					})
-					if(clip) volume._clips[filename] = clip
-				} catch(err) {
-					console.error("volume-3js: cannot load animation file",filename,err)
-					continue
-				}
-			}
-
-			// @todo replace with something more neutral less targeted to wolf3d
-			let part = volume._node.getObjectByName('Wolf3D_Body') || volume._node.getObjectByName('Wolf3D_Avatar') || volume._node.getObjectByName('CC_Game_Body')
-			if(!part) {
-				console.error("volume-3js: missing body parts for animations",volume)
 			} else {
-				volume._mixer = new THREE.AnimationMixer(part)
+
+				// vrm models are rotated? correct this
+				let vrm = gltf.userData.vrm
+
+				// this is needed for vrm 0.0 rigs only - improve later or force use of vrm 1.0
+				if(true) {
+					const bones = vrm.humanoid.rawHumanBones
+					vrm.humanoid.normalizedHumanBonesRoot.removeFromParent()
+					bones.hips.node.rotateY(Math.PI)
+					vrm.humanoid = new VRMHumanoid(bones)
+					vrm.update(100)
+				}
+
+				volume._vrm = gltf.scene._vrm = gltf._vrm = gltf.userData.vrm = vrm
+
+				//console.log("volume-3js: loaded vrm",vrm)
+				// calling these functions greatly improves the performance (but collides with optimizers)
+				//VRMUtils.removeUnnecessaryVertices( gltf.scene );
+				//VRMUtils.removeUnnecessaryJoints( gltf.scene );
+
+				vrm.scene.traverse( ( obj ) => { obj.frustumCulled = false })
+				this.scene.add(vrm.scene)
+			}
+
+			// remember animations if any found
+	        if(gltf.animations) {
+	        	volume._clips = {}
+	        	for(let clip of gltf.animations) {
+	        		console.log("volume-3js: noticed an animation in the geometry file",clip.name)
+	        		volume._clips[clip.name]=clip
+	        		volume.animation=clip.name
+	        	}
+	        }
+
+	        // also load explicit animations if any
+	        if(volume.animations) {
+				this._animations_lazy_load(volume)
 			}
 		}
-
-		//////////////////////////////////////////////////////////////////////////////////////
-
-
-		this._update_pose(volume)
-
 	}
 
 	_update_pose(volume) {
@@ -509,7 +542,7 @@ class VolumeManager {
 		}
 
 		if(volume.camera_follow) {
-			this._cameraRetarget(volume._node)
+			this._camera_retarget(volume._node)
 		}
 
 	}
@@ -529,7 +562,8 @@ class VolumeManager {
 		// stuff this in for now
 		blob.volume.uuid = blob.uuid
 
-		// for now keep track of entity state ourselves - unfolding entire entity here
+		// for now clone/copy volume component state ourselves
+		// @todo may only need to track the volume component not the whole thing!
 		let entity = this.entities[blob.uuid]
 		if(!entity) {
 			entity = this.entities[blob.uuid] = blob
@@ -550,10 +584,13 @@ class VolumeManager {
 			return
 		}
 
-		// perform updates to entity right now - this could be deferred to update loop @todo
-		await this._update_miscellaneous(entity.volume)
+		// perform updates to a single volume component immediately
+		// another way would be to mark volume as dirty and do this in the update loop @todo debate this idea
 
-		// peek directly at entity children as a convenience
+		await this._update_geometry(entity.volume)
+		this._update_pose(entity.volume)
+
+		// peek directly at entity children and also update them
 		if(!entity.children) return
 		let counter = 0
 		for(const child of entity.children) {
@@ -628,7 +665,7 @@ export const volume_observer = {
 
 		if(blob.tick) {
 			Object.values(_volume_managers).forEach(manager=>{
-				manager.update(blob.time,blob.delta)
+				manager.step(blob.time,blob.delta)
 			})
 			return blob
 		}
