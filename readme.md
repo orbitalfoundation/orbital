@@ -1,6 +1,6 @@
 # Orbital
 
-Orbital is an agent middleware library for building digital twins, games and simulations.
+Orbital is a framework for building digital twins, games and multi agent simulations.
 
 See https://github.com/orbitalfoundation 
 

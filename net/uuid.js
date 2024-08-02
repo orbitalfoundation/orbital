@@ -59,14 +59,10 @@ export const uuid_client = () => {
 /// @todo probaby best to not use an async import and also not to rely on npm install node_modules
 ///
 
-export const uuid_server = () => {
+export const uuid_server = async () => {
 	if(localid) return localid
-	return new Promise( (resolve,reject) => {
-		import('node-machine-id').then(modules=>{
-			localid = "server-" + modules.default.machineIdSync({original:true})
-			resolve(localid)
-		})
-		reject()
-	})
+	const modules = await import('node-machine-id')
+	localid = "server-" + modules.default.machineIdSync({original:true})
+	return localid
 }
 

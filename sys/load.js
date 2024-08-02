@@ -8,16 +8,16 @@ const _load_configuration = {
 	manifest:'index.js',
 	importmaps: {
 		'orbital':'orbital',
-		'@':''
+		'@':'' // @todo may deprecate support for '@' notation since it is no longer used
 	},
 	anchor:null
 }
 
 const resolve = async function(blob,sys) {
-	if(!blob.load) return blob
+	if(!blob.load) return
 
 	//
-	// a persistent anchor concept is used to ground subsequent loads
+	// a persistent anchor concept is used to ground subsequent loads - @todo may deprecate it is not used now
 	// @todo this may need some push/pop style scoping such as when loading manifests from some other projects
 	//
 
@@ -36,9 +36,11 @@ const resolve = async function(blob,sys) {
 	for(let resource of candidates) {
 		resource = harmonize_resource_path(this._load_configuration,resource)
 		try {
+			log(uuid,'loading',resource)
 			const module = await import(resource)
 			for(const [k,v] of Object.entries(module)) {
 				try {
+					//log(uuid,'resolving',k,resource)
 					await sys.resolve(v)
 				} catch(e) {
 					error(uuid,' - error corrupt artifact key=',k,'content=',v,'error=',e)
@@ -48,10 +50,6 @@ const resolve = async function(blob,sys) {
 			error(uuid,'- error unable to load',err)
 		}
 	}
-
-	// done
-
-	return blob
 }
 
 export const load_observer = {
@@ -72,7 +70,7 @@ export const harmonize_resource_path = (config,resource) => {
 
 	// valid?
 	if (!resource || typeof resource !== 'string' && !(resource instanceof String) || !resource.length) {
-		error(uuid,'- invalid resource',anchor,resource,resource)
+		error(uuid,'- invalid resource',resource,resource)
 		return null
 	}
 

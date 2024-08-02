@@ -10,13 +10,15 @@ class Server {
 	io = null
 	sys = null
 
-	constructor() {
+	constructor(sys) {
+		this.sys = sys
 		if(!globalThis._http) {
 			error('network server: http must be started first')
 			return
 		}
 		this.io = new Socket.Server(globalThis._http)
 		this.io.on('connection', this._fresh_connection.bind(this) )
+		console.log("server started")
 	}
 
 	async _fresh_connection(socket) {
@@ -40,14 +42,13 @@ class Server {
 
 	async _consume_incoming_data(socket,blob) {
 
-		if(!blob || !blob.network) return
-
-		if( typeof blob !== 'object' ||
+		if(!blob || typeof blob !== 'object' ||
 			Array.isArray(blob) ||
+			!blob.network ||
 			typeof blob.network !== 'object' ||
 			Array.isArray(blob.network))
 		{
-			error('network server: data invalid',blob)
+			error('server: data network invalid',blob)
 			return
 		}
 
@@ -56,30 +57,11 @@ class Server {
 			return
 		}
 
-console.log(blob)
-
 		// mark as remote to avoid loops
 		blob.network.remote = true
 
-		// handle remote query right now and return
-		if(blob.network.query) {
-			if(!this.sys) {
-				error('network server: no sys')
-				return
-			}
-			log('network server: websocket got a query request',socket.id)
-			const candidates = this.sys.query({network:true})
-			for(const entity of candidates) {
-				socket.emit('data',entity)
-			}
-			return
-		}
-
-		// echo state to other parties over network ... later let packets themselves indicate multicast or not
-		const sockets = await this.io.fetchSockets()
-		for(const other of sockets) {
-			other.emit('data',blob)
-		}
+		// echo to other sockets for now ... it's debatable if resolve() should do this or not
+        socket.broadcast.emit('data',blob)
 
 		// wait for internal resolver to finalize ... not sure await really makes any difference @todo debate
 		this.sys.resolve(blob)
@@ -92,7 +74,7 @@ console.log(blob)
 			return
 		}
 
-		log("server: server disconnect ",socket)
+		log("server: server disconnect ")
 
 		// @todo add a heartbeat system? clients can delete on loss of heartbeat
 		// @todo do not delete truly persistent objects
@@ -126,15 +108,9 @@ console.log(blob)
 		// set sys if we see it
 		this.sys = sys
 
-		if(!blob || !blob.network) return
-
-		if(blob.network.remote) {
-			//warn('network server: ignoring traffic that is already handled',blob)
-			return
-		}
-
-		if( typeof blob !== 'object' ||
+		if(!blob || typeof blob !== 'object' ||
 			Array.isArray(blob) ||
+			!blob.network ||
 			typeof blob.network !== 'object' ||
 			Array.isArray(blob.network))
 		{
@@ -142,9 +118,14 @@ console.log(blob)
 			return
 		}
 
-		// @todo loopback protection will be needed
+		if(blob.network.remote) {
+			//warn('network server: ignoring traffic that is already handled',blob)
+			return
+		}
 
 		const sponsor = await uuid_server()
+
+		// @todo loopback protection will be needed
 
 		// mark up as originating from us if has not been networked yet
 		if(!blob.network.sponsor) blob.network.sponsor = sponsor
@@ -152,8 +133,21 @@ console.log(blob)
 		// also stuff in the server identifier as well for fun
 		blob.network.server_sponsor = sponsor
 
-		// multicast to other parties 
 		const sockets = await this.io.fetchSockets()
+
+		// if monocast
+		if(blob.network.monocast) {
+			for(let socket of sockets) {
+				if(socket.id == blob.network.monocast) {
+					blob.network.socketid = sponsor
+					socket.emit('data',blob)
+					break
+				}
+			}
+			return
+		}
+
+		// multicast to other parties 
 		for(let socket of sockets) {
 			socket.emit('data',blob)
 		}
@@ -166,14 +160,16 @@ export const server_observer = {
 	about: 'server traffic observer',
 	resolve: function(blob,sys) {
 		if(blob.tick) return blob
-		if(!blob.network && !blob.server) return blob
 
-		if(!this._server) {
-			this._server = new Server()
+		if(blob.server && !this._server) {
+			this._server = new Server(sys)
 			log("server: sockets started for server")
 		}
 
-		this._server.resolve(blob,sys)
+		if(blob.network) {
+			this._server.resolve(blob,sys)
+		}
+
 		return blob
 	}
 }

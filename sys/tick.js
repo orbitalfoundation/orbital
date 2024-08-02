@@ -4,7 +4,11 @@ const isServer = (typeof window === 'undefined') ? true : false
 let	timePrevious = 0
 let	sanityCheck = 0
 
-async function run(sys) {
+//
+// client and server tick helper
+//
+
+async function _run(sys) {
 
 	const framerate = 1000/60
 	const minimum = 4
@@ -12,7 +16,7 @@ async function run(sys) {
 	const time = performance.now()
 	const delta = timePrevious ? time - timePrevious : framerate
 
-	// arguably tick may not need an id; and or the id could change; but this would pollute the database needlessly @todo
+	// arguably tick may not need an id; and or the id could change; but this would pollute the database needlessly if it changed - @todo may remove uuid
 	const tick = {name:'tick',time,delta,tick:true,uuid:`/orbital/sys/tick` }
 	await sys.resolve(tick)
 
@@ -22,7 +26,7 @@ async function run(sys) {
 	const sleep = elapsed < framerate && elapsed > minimum ? (framerate-elapsed) : minimum
 
 	const done = () => {
-		run(sys)
+		_run(sys)
 	}
 
 	if(!isServer && window.requestAnimationFrame) {
@@ -32,11 +36,15 @@ async function run(sys) {
 	}
 }
 
+//
+// tick is a way that other observers can run every frame
+// @todo it's arguable if this is really conceptually an observer at all but observers like this are the only way orbital does 'work' for now
+//
+
 const resolve = async function(blob,sys) {
-	if(this._initialized) return blob
+	if(this._initialized) return
 	this._initialized = true
-	run(sys)
-	return blob
+	_run(sys)
 }
 
 export const tick_observer = {

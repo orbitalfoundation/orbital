@@ -2,39 +2,31 @@
 import * as fs from 'fs'
 import * as URL from 'url'
 import * as path from 'path'
-import * as http from 'http'
+import http from 'http'
+import https from 'http'
 import { mimeTypes } from './mimetypes.js'
-
-//
-// must always concatenate full path because sometimes relative paths are symbolic links and will fail if using ../ dereferencing
-//
-
-let root = process.cwd()
 
 //
 // helper to find SPA files
 //
 
-let routes = {}
-
 async function spa_file(req) {
 
-	// deal with subdomains @todo
+	// find the server side base of zones
+	const root = process.cwd() + "/zones"
 
+	// get subdomain as a zone if any or default to 'default' for now
+	const zone = req.headers.host.split('.').length > 2 ? req.headers.host.split(".").slice(0,1).join() : "default"
+
+	// find client side conception of resource
 	const url = URL.parse('https://'+req.headers.host+req.url)
-
-	const rewrite = routes[url.hostname]
-	if(rewrite) {
-		root = root + "/" + rewrite
-	}
-
 	let pathname = url.pathname
 	let resource
 	let leaf = ''
 
 	// if pathname ends in /index.html then strip index.html or fail - do not keep trying to find a file
 	if(pathname.endsWith('/index.html')) {
-		resource = path.join(root,pathname)
+		resource = path.join(root,zone,pathname)
 		if(!fs.existsSync(resource)) {
 			return null
 		}
@@ -44,13 +36,13 @@ async function spa_file(req) {
 			return null
 		}
 		pathname = pathname.substr(0,-10)
-		console.log("http: redirecting path to strip index.html",req.path,pathname)
+		console.log("http: redirecting path to strip index.html",pathname,resource)
 		return { redirect: pathname }
 	}
 
 	// if pathname ends in a slash then return pathname/index.html or fail - do not keep trying to find a file
 	if(pathname.endsWith('/')) {
-		resource = path.join(root,pathname,'index.html')
+		resource = path.join(root,zone,pathname,'index.html')
 		if(!fs.existsSync(resource)) {
 			return null
 		}
@@ -59,25 +51,25 @@ async function spa_file(req) {
 		if(stats.isDirectory()) {
 			return null
 		}
-		//console.log("http: found spa resource",resource)
+		console.log("http: found spa index resource",pathname,resource)
 		return stats
 	}
 
 	// return ordinary files - must ignore folders (allow folders to fall through to below)
 	{
-		resource = path.join(root,pathname)
+		resource = path.join(root,zone,pathname)
 		if(fs.existsSync(resource)) {
 			let stats = fs.statSync(resource)
 			stats.resource = resource
 			if(!stats.isDirectory()) {
-				//console.log("http: found file resource",resource)
+				console.log("http: found file",pathname,resource)
 				return stats
 			}
 		}
 	}
 
-	// don't allow routes to have dots in them
-	const mime = pathname.indexOf('.')
+	// don't allow spa routes to have dot .mime type 
+	const mime = pathname.lastIndexOf('.')
 	if(mime >= 0 && mimeTypes[pathname.slice(mime+1)]) {
 		console.log("http: found mime type - probably not a route - rejecting",pathname)
 		return null
@@ -86,7 +78,7 @@ async function spa_file(req) {
 	// enter spa app routing search mode - search upwards for an index.html
 	const parts = pathname.match(/[^\/]+/g) || []
 	while(true) {
-		resource = path.join(root,...parts,"index.html")
+		resource = path.join(root,zone,...parts,"index.html")
 		console.log("http: looking upwards for resource",resource)
 		if(fs.existsSync(resource)) {
 			let stats = fs.statSync(resource)
@@ -105,58 +97,97 @@ async function spa_file(req) {
 	return null
 }
 
-/*
 const proxy = async(req,res) => {
-
 	if(req.url !== "/proxy") return false
-
 	const url = req.headers.proxy
 	delete req.headers.proxy
-
-	let requestBody = ''
-
+	const parts = []
 	req.on('data', chunk => {
-		requestBody += chunk.toString()
+		parts.push(chunk)
 	})
-
 	req.on('end', async () => {
-
+		const body = Buffer.concat(parts)
 		try {
-
-			const sendme = req.method.toLowerCase() === 'post' ? JSON.parse(requestBody) : null
 			const options = {
 				method: req.method,
 				headers : req.headers,
+				body
 			}
-			if(sendme) options.body = JSON.stringify(sendme)
-
-			const response = await fetch(url, options )
-			const json = await response.json()
-			const body = JSON.stringify(json)
-
-			res.writeHead(response.status,{
-				...response.headers,
-				'Content-Length': body.length,
-				'Content-Type': 'application/json',				
-			})
-
-			res.end(body)
-
+			const res2 = await fetch(url,options)
+			console.log(res2)
+			const body2 = await res2.text()
+			res.writeHead(res2.status,res2.headers)
+			res.end(body2)
 		} catch (error) {
 			console.error('Proxy request failed:', error);
 			res.writeHead(500, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ error: 'Proxy request failed' }));
 		}
 	})
+	return true
+}
+
+const prox2y = async(req,res) => {
+
+	// is proxy request?
+	if(req.url !== "/proxy") return false
+
+	// get real url
+	const targetUrl = req.headers['proxy']
+	if (!targetUrl) {
+		res.writeHead(400, { 'Content-Type': 'text/plain' })
+		res.end('Proxy target URL is missing')
+		return false
+	}
+
+	// rebuild url
+	const parsedUrl = URL.parse(targetUrl)
+	const options = {
+		hostname: parsedUrl.hostname,
+		port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+		path: parsedUrl.path,
+		method: req.method,
+		headers: { ...req.headers }
+	}
+	delete options.headers['proxy']
+
+	// Handle preflight CORS request
+	if (req.method === 'OPTIONS') {
+		res.writeHead(204, {
+			'Access-Control-Allow-Origin': '*',
+			'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+			'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+		})
+		res.end()
+		console.log("preflight")
+		return true
+	}
+
+	console.log("real deal")
+
+	// pipe response from proxy request back to client
+	const proxyReq = (parsedUrl.protocol === 'https:' ? https : http).request(options, (proxyRes) => {
+		res.writeHead(proxyRes.statusCode, proxyRes.headers)
+		proxyRes.pipe(res, { end: true })
+	})
+
+	proxyReq.on('error', (err) => {
+		res.writeHead(500, { 'Content-Type': 'text/plain' })
+		res.end('Proxy error: ' + err.message)
+	})
+
+	req.pipe(proxyReq, { end: true })
+
+	//req.on('end', () => { proxyReq.end() })
 
 	return true
 }
-*/
+
 
 async function http_handle_request(req, res) {
 
 	// a standalone proxy handler
-	// if( await proxy(req,res) ) return
+	if( await proxy(req,res) ) return
 
 	let stats = await spa_file(req)
 
@@ -267,17 +298,9 @@ export const http_observer = {
 		if(!blob.http) return blob
 
 		if(!globalThis._http) {
-			globalThis._http = http.createServer(http_handle_request).listen(config)
+			// @todo use supplied config if any
+			globalThis._http = http.createServer( http_handle_request ).listen(config)
 			console.log("http: started",config.host,config.port)
-		}
-
-		console.log("http - got some config",blob.http)
-
-		// @todo ask the database for all apps or services
-		// @todo deal with config properties also
-
-		if(blob.http.routes) {
-			routes = { ...routes, ...blob.http.routes }
 		}
 
 		return blob

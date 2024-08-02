@@ -11,29 +11,29 @@ const resolve = async function(blob,sys) {
 
 	// handle requests that have uuids only
 	if(!blob.uuid) {
-		return blob
+		return
 	}
 	let uuid = blob.uuid
 
 	// obliterate if desired; but still continue to pass the blob through other handlers
 	if(blob.obliterate) {
 		delete sys._uuids[uuid]
-		return blob
+		return
 	}
 
 	// find existing entity if any
 	let entity = sys._uuids[uuid]
 
-	// update volatile storage
 	if(!entity) {
+		// reference original blob wholesale to permit live connection to database state - @todo revisit this concept later
 		blob._updated = blob._created = time
 		sys._uuids[uuid] = blob
 	} else {
-		blob._updated = time
+		// copy transient blob onto live state - this requires a deep copy and can be a bit fragile
 		append(blob,entity)
+		entity._updated = time
 	}
 
-	return blob
 }
 
 const query_matches = (args,candidate) => {

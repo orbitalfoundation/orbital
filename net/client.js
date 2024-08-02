@@ -37,6 +37,7 @@ async function client_resolve(blob,sys) {
 
 	const send_helper = (socket,blob)=> {
 
+		// set sender socket for now - debatable
 		if(!blob.network.socketid) {
 			blob.network.socketid = socket.id
 		}
@@ -57,10 +58,10 @@ async function client_resolve(blob,sys) {
 			delete send.volume.camera_follow
 		}
 
-		// this isn't really used but it feels reasonable to have some kind of identifier for the source
-		if(!send.network.host) send.network.sponsor = sponsor
+		// 'sponsor' isn't really used but it feels reasonable to have some kind of identifier for the source? @todo evaluate 
+		if(!send.network.sponsor) send.network.sponsor = sponsor
 
-		log("network client: sending",send)
+		// log("network client: sending",send)
 
 		socket.emit('data',send)
 	}
@@ -70,7 +71,7 @@ async function client_resolve(blob,sys) {
 		log("network client inbound:",blob)
 
 		if(blob.network.sponsor === sponsor) {
-			//error("network client: client got something it created",blob)
+			error("network client: client got something it created",blob)
 			return
 		}
 

@@ -43,10 +43,11 @@ const resolve = async (blob,sys) => {
 
 			// do work
 			if(observer.resolve) {
-				blob = await observer.resolve(blob,sys)
+				const temp = await observer.resolve(blob,sys)
+				if(temp) blob = temp
 			}
-			// early exit? @todo could require an actual blob { abort: true } ?
-			if(!blob) {
+			// @todo test an idea of permitting early exit to chain of observers
+			if(blob && blob.early_exit) {
 				console.warn("sys:raw early exit: ",observer)
 				break
 			}

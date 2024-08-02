@@ -1,5 +1,7 @@
+zones
+secrets.js
 package-lock.json
-todo*
+
 *.tgz
 
 # Mac arbage
