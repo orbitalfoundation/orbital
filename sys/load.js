@@ -13,6 +13,8 @@ const _load_configuration = {
 	anchor:null
 }
 
+const visited = {}
+
 const resolve = async function(blob,sys) {
 	if(!blob.load) return
 
@@ -30,24 +32,50 @@ const resolve = async function(blob,sys) {
 
 	//
 	// load requested files
+	// all exports are treated as raw inputs to sys.resolve - or basically messages
+	// sys.resolve can digest objects (treated as an entity with components)
+	// sys.resolve can also digest arrays, which may be more arrays or may be objects
 	//
 
 	const candidates = Array.isArray(blob.load) ? blob.load : [blob.load]
 	for(let resource of candidates) {
+
+		// divine the real location of the resource
 		resource = harmonize_resource_path(this._load_configuration,resource)
+
+		// because of the fickle nature of asset geography in filesystems we inject the file path into assets
+		const remember_resource_path = (item) => {
+			if(Array.isArray(item)) {
+				item.forEach( remember_resource_path )
+			} else {
+				item._resource_path = resource
+			}
+		}
+
+		// go out of our way to block duplicate load attempts on canonical resources
+		if(visited[resource]) {
+			// warn(uuid,' - already attempted to load once',resource)
+			continue
+		}
+		visited[resource] = true
+
 		try {
-			log(uuid,'loading',resource)
-			const module = await import(resource)
-			for(const [k,v] of Object.entries(module)) {
-				try {
-					//log(uuid,'resolving',k,resource)
-					await sys.resolve(v)
-				} catch(e) {
-					error(uuid,' - error corrupt artifact key=',k,'content=',v,'error=',e)
+			// trying to reduce an error console log - sadly not easy to do without a custom server method @todo
+			let exists = true //await fetch(resource, { method: 'HEAD' })
+			if(exists) {
+				const module = await import(resource)
+				for(const [k,v] of Object.entries(module)) {
+					try {
+						//log(uuid,'resolving',k,resource)
+						remember_resource_path(v)
+						await sys.resolve(v)
+					} catch(e) {
+						//error(uuid,' - error corrupt artifact key=',k,'content=',v,'error=',e)
+					}
 				}
 			}
 		} catch(err) {
-			error(uuid,'- error unable to load',err)
+			//error(uuid,'- error unable to load',err)
 		}
 	}
 }

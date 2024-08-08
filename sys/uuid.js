@@ -24,13 +24,18 @@ const resolve = async function(blob,sys) {
 	// find existing entity if any
 	let entity = sys._uuids[uuid]
 
+	// add new
 	if(!entity) {
-		// reference original blob wholesale to permit live connection to database state - @todo revisit this concept later
+		blob._entity = blob
 		blob._updated = blob._created = time
 		sys._uuids[uuid] = blob
-	} else {
-		// copy transient blob onto live state - this requires a deep copy and can be a bit fragile
+		return
+	}
+
+	// update existing
+	{
 		append(blob,entity)
+		blob._entity = entity
 		entity._updated = time
 	}
 
@@ -48,7 +53,8 @@ const query_matches = (args,candidate) => {
 const query = function(args,sys) {
 
 	if(args.uuid) {
-		return [ sys._uuids[args.uuid] ]
+		const elem = sys._uuids[args.uuid]
+		return elem ? [ elem ] : []
 	}
 
 	const results = []

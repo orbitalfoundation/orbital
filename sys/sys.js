@@ -12,7 +12,7 @@ if(isServer) {
 	await import('../utils/server-logging.js')
 }
 
-const uuid = 'orbital/sys/sys.js'
+const uuid = '/orbital/sys/sys.js'
 
 const description = 'Sys - orbital messaging backbone'
 

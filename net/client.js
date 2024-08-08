@@ -47,16 +47,21 @@ async function client_resolve(blob,sys) {
 			return
 		}
 
-		// hack @todo must improve - we need to have a template for what we can send
-		let send = { ... blob }
-		if(send.volume) {
-			send.volume = { ... send.volume }
-			delete send.volume._node
-			delete send.volume._camera
-			delete send.volume._gltf
-			delete send.volume._node_tried_load
-			delete send.volume.camera_follow
+		// strip off things that start with _ for now - a poor mans filter @todo later use a schema
+		function strip(src) {
+			const target = {}
+			Object.entries(src).forEach(([k,v]) =>{
+				if(k.startsWith('_')) return
+				if(typeof v === 'object' && !Array.isArray(v) && v !== null) {
+					target[k] = strip(v)
+				} else {
+					target[k] = v
+				}
+			})
+			return target
 		}
+
+		const send = strip(blob)
 
 		// 'sponsor' isn't really used but it feels reasonable to have some kind of identifier for the source? @todo evaluate 
 		if(!send.network.sponsor) send.network.sponsor = sponsor
@@ -93,15 +98,15 @@ async function client_resolve(blob,sys) {
 	const rebuild_helper = (blob) => {
 		const socket = sockets[upstream] = window.io()
 		socket.on('connect',()=>{
-			log('net: connected! localid is',socket.id)
+			//log('net: connected! localid is',socket.id)
 			send_helper(socket,blob)
 		})
 		socket.on('data',(blob)=>{
 			inbound_helper(socket,blob)
 		})
 		socket.on('disconnect',(data)=>{
-			error("network client: ******* disconnected why?",socket.id,data)
-			log('net: TBD delete remote entities that are marked as transient remote') // @todo
+			//warn("network client: ******* disconnected why?",socket.id,data)
+			//log('net: TBD delete remote entities that are marked as transient remote') // @todo
 			socket.destroy()
 			delete sockets[upstream]
 		})

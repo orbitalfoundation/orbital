@@ -51,7 +51,7 @@ async function spa_file(req) {
 		if(stats.isDirectory()) {
 			return null
 		}
-		console.log("http: found spa index resource",pathname,resource)
+		//console.log("http: found spa index resource",pathname,resource)
 		return stats
 	}
 
@@ -62,7 +62,7 @@ async function spa_file(req) {
 			let stats = fs.statSync(resource)
 			stats.resource = resource
 			if(!stats.isDirectory()) {
-				console.log("http: found file",pathname,resource)
+				//console.log("http: found file",pathname,resource)
 				return stats
 			}
 		}
@@ -191,9 +191,9 @@ async function http_handle_request(req, res) {
 
 	let stats = await spa_file(req)
 
-	if(stats && stats.redirect) {
+	if(stats && stats.hasOwnProperty('redirect')) {
 		console.log("server::http sending a redirect to the client",stats.redirect)
-		res.writeHead(302, { 'Location': stats.redirect })
+		res.writeHead(302, { 'Location': stats.redirect || "/" })
 		res.end()
 		return
 	}
@@ -205,6 +205,8 @@ async function http_handle_request(req, res) {
 		res.end()
 		return
 	}
+
+	console.log("http ...",stats)
 
 	// @todo use incremental file reader stream later
 	fs.readFile(stats.resource,'binary', async (err, data) => {
