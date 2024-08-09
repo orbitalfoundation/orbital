@@ -12,11 +12,9 @@ import { mimeTypes } from './mimetypes.js'
 
 async function spa_file(req) {
 
-	// find the server side base of zones
-	const root = process.cwd() + "/zones"
-
 	// get subdomain as a zone if any or default to 'default' for now
-	const zone = req.headers.host.split('.').length > 2 ? req.headers.host.split(".").slice(0,1).join() : "default"
+	const cwd = process.cwd()
+	const zone = req.headers.host.split('.').length > 2 ? path.join(cwd,'shared',req.headers.host.split(".").slice(0,1).join()) : cwd
 
 	// find client side conception of resource
 	const url = URL.parse('https://'+req.headers.host+req.url)
@@ -26,7 +24,7 @@ async function spa_file(req) {
 
 	// if pathname ends in /index.html then strip index.html or fail - do not keep trying to find a file
 	if(pathname.endsWith('/index.html')) {
-		resource = path.join(root,zone,pathname)
+		resource = path.join(zone,pathname)
 		if(!fs.existsSync(resource)) {
 			return null
 		}
@@ -42,7 +40,7 @@ async function spa_file(req) {
 
 	// if pathname ends in a slash then return pathname/index.html or fail - do not keep trying to find a file
 	if(pathname.endsWith('/')) {
-		resource = path.join(root,zone,pathname,'index.html')
+		resource = path.join(zone,pathname,'index.html')
 		if(!fs.existsSync(resource)) {
 			return null
 		}
@@ -57,7 +55,7 @@ async function spa_file(req) {
 
 	// return ordinary files - must ignore folders (allow folders to fall through to below)
 	{
-		resource = path.join(root,zone,pathname)
+		resource = path.join(zone,pathname)
 		if(fs.existsSync(resource)) {
 			let stats = fs.statSync(resource)
 			stats.resource = resource
@@ -78,7 +76,7 @@ async function spa_file(req) {
 	// enter spa app routing search mode - search upwards for an index.html
 	const parts = pathname.match(/[^\/]+/g) || []
 	while(true) {
-		resource = path.join(root,zone,...parts,"index.html")
+		resource = path.join(zone,...parts,"index.html")
 		console.log("http: looking upwards for resource",resource)
 		if(fs.existsSync(resource)) {
 			let stats = fs.statSync(resource)
