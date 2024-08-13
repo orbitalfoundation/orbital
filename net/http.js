@@ -204,8 +204,6 @@ async function http_handle_request(req, res) {
 		return
 	}
 
-	console.log("http ...",stats)
-
 	// @todo use incremental file reader stream later
 	fs.readFile(stats.resource,'binary', async (err, data) => {
 
