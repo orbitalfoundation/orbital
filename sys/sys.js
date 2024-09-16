@@ -30,7 +30,6 @@ export const sys = {
 	uuid,
 	description,
 	isServer,
-	_uuids: {},
 	_observers: [
 		raw_observer,
 		uuid_observer,

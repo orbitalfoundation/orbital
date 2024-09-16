@@ -16,6 +16,10 @@ const sockets = {}
 
 async function client_resolve(blob,sys) {
 
+// xxx @todo there may be some kind of corrupt blob or blob with too much data in it
+// look at this more closely
+return
+
 	// we are seeing traffic that we want to send to server?
 	if(!blob.network) return
 
@@ -135,10 +139,9 @@ async function client_resolve(blob,sys) {
 export const client_observer = {
 	about: 'network client traffic observer',
 	resolve: async function(blob,sys) {
-		if(blob.tick) return blob
-		if(!blob.network) return blob
+		if(blob.tick) return
+		if(!blob.network) return
 		client_resolve(blob,sys) // don't be async just throw it
-		return blob
 	}
 }
 

@@ -14,7 +14,8 @@ async function spa_file(req) {
 
 	// get subdomain as a zone if any or default to 'default' for now
 	const cwd = process.cwd()
-	const zone = req.headers.host.split('.').length > 2 ? path.join(cwd,'shared',req.headers.host.split(".").slice(0,1).join()) : cwd
+	//const zone = req.headers.host.split('.').length > 2 ? path.join(cwd,'shared',req.headers.host.split(".").slice(0,1).join()) : cwd
+	const zone = cwd
 
 	// find client side conception of resource
 	const url = URL.parse('https://'+req.headers.host+req.url)

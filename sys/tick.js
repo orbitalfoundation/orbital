@@ -17,7 +17,7 @@ async function _run(sys) {
 	const delta = timePrevious ? time - timePrevious : framerate
 
 	// arguably tick may not need an id; and or the id could change; but this would pollute the database needlessly if it changed - @todo may remove uuid
-	const tick = {name:'tick',time,delta,tick:true,uuid:`/orbital/sys/tick` }
+	const tick = {name:'tick',time,delta,tick:true }
 	await sys.resolve(tick)
 
 	timePrevious = time
