@@ -55,13 +55,13 @@ const query_matches = (args,candidate) => {
 const query = function(args,sys) {
 
 	if(args.uuid) {
-		const elem = sys._uuids[args.uuid]
+		const elem = uuids[args.uuid]
 		return elem ? [ elem ] : []
 	}
 
 	const results = []
 
-	for (const [uuid,entity] of Object.entries(sys._uuids)) {
+	for (const [uuid,entity] of Object.entries(uuids)) {
 		if(!query_matches(args,entity)) continue
 		results.push(entity)
 	}
@@ -73,7 +73,7 @@ const query = function(args,sys) {
 
 let db
 const uuids = {}
-const USEDB = true
+const USEDB = false
 
 function db_init() {
 
